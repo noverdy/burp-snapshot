@@ -10,7 +10,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
-import javax.swing.JTabbedPane;
+import javax.swing.JToggleButton;
 import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
@@ -54,16 +54,18 @@ public final class SnapshotsTab extends JPanel {
     private final DefaultListModel<Entry> exported = new DefaultListModel<>();
     private final JList<Entry> draftList = list(drafts);
     private final JList<Entry> exportedList = list(exported);
-    private final JTabbedPane lists = new JTabbedPane();
+    private static final Color ACCENT = new Color(0xFF6633);
+    private final java.awt.CardLayout cards = new java.awt.CardLayout();
+    private final JPanel listCards = new JPanel(cards);
+    private final JToggleButton draftsTab = new JToggleButton("Drafts");
+    private final JToggleButton exportedTab = new JToggleButton("Exported");
     private final Preview preview = new Preview();
 
     public SnapshotsTab(Source source) {
         super(new BorderLayout());
         this.source = source;
-        lists.addTab("Drafts", new JScrollPane(draftList));
-        lists.addTab("Exported", new JScrollPane(exportedList));
-        lists.addChangeListener(e -> showSelection());
-        lists.putClientProperty("JTabbedPane.trailingComponent", help());
+        listCards.add(new JScrollPane(draftList), "drafts");
+        listCards.add(new JScrollPane(exportedList), "exported");
 
         JButton open = new JButton("Open");
         open.addActionListener(e -> withSelection(source::open));
@@ -74,7 +76,8 @@ public final class SnapshotsTab extends JPanel {
         buttons.add(delete);
 
         JPanel left = new JPanel(new BorderLayout());
-        left.add(lists, BorderLayout.CENTER);
+        left.add(header(), BorderLayout.NORTH);
+        left.add(listCards, BorderLayout.CENTER);
         left.add(buttons, BorderLayout.SOUTH);
 
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, preview);
@@ -89,20 +92,61 @@ public final class SnapshotsTab extends JPanel {
         });
     }
 
-    private static JComponent help() {
-        JButton help = new JButton("?");
-        help.putClientProperty("JButton.buttonType", "help");
-        help.setFocusable(false);
-        help.setToolTipText("<html><div style='width:260px'>Drafts keep your last 20 unexported snapshots. "
-                + "Copying or saving an image moves it to Exported. Everything is stored in the current Burp project.</div></html>");
-        JPanel trailing = new JPanel(new java.awt.GridBagLayout());
-        trailing.setOpaque(false);
-        trailing.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 8));
-        java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
-        c.weightx = 1;
-        c.anchor = java.awt.GridBagConstraints.EAST;
-        trailing.add(help, c);
-        return trailing;
+    private JComponent header() {
+        JPanel tabs = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        tabs.setOpaque(false);
+        javax.swing.ButtonGroup group = new javax.swing.ButtonGroup();
+        for (JToggleButton tab : List.of(draftsTab, exportedTab)) {
+            tab.setFocusPainted(false);
+            tab.setContentAreaFilled(false);
+            tab.addItemListener(e -> {
+                styleTab(tab);
+                cards.show(listCards, tab == draftsTab ? "drafts" : "exported");
+                showSelection();
+            });
+            styleTab(tab);
+            group.add(tab);
+            tabs.add(tab);
+        }
+        draftsTab.setSelected(true);
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, UIManager.getColor("Separator.foreground")));
+        header.add(tabs, BorderLayout.WEST);
+        header.add(new HelpMark("Drafts: last 20 unexported snapshots. Exported: copied or saved at least once. Stored in this Burp project."),
+                BorderLayout.EAST);
+        return header;
+    }
+
+    private static void styleTab(JToggleButton tab) {
+        boolean on = tab.isSelected();
+        tab.setFont(tab.getFont().deriveFont(on ? Font.BOLD : Font.PLAIN));
+        tab.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 2, 0, on ? ACCENT : new Color(0, 0, 0, 0)),
+                BorderFactory.createEmptyBorder(8, 14, 6, 14)));
+    }
+
+    private static final class HelpMark extends JComponent {
+
+        HelpMark(String tooltip) {
+            setToolTipText(tooltip);
+            setPreferredSize(new java.awt.Dimension(40, 30));
+        }
+
+        @Override
+        protected void paintComponent(Graphics g0) {
+            Graphics2D g = (Graphics2D) g0.create();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            int d = 18, x = getWidth() - d - 12, y = (getHeight() - d) / 2;
+            Color fg = UIManager.getColor("Label.disabledForeground");
+            g.setColor(fg == null ? Color.GRAY : fg);
+            g.setStroke(new java.awt.BasicStroke(1.4f));
+            g.drawOval(x, y, d, d);
+            g.setFont(getFont().deriveFont(Font.BOLD, 12f));
+            java.awt.FontMetrics fm = g.getFontMetrics();
+            g.drawString("?", x + (d - fm.stringWidth("?")) / 2f + 0.5f, y + (d + fm.getAscent() - fm.getDescent()) / 2f);
+            g.dispose();
+        }
     }
 
     public void refresh() {
@@ -114,8 +158,8 @@ public final class SnapshotsTab extends JPanel {
         drafts.clear();
         exported.clear();
         for (Entry e : source.entries()) (e.exported() ? exported : drafts).addElement(e);
-        lists.setTitleAt(0, "Drafts (" + drafts.size() + ")");
-        lists.setTitleAt(1, "Exported (" + exported.size() + ")");
+        draftsTab.setText("Drafts (" + drafts.size() + ")");
+        exportedTab.setText("Exported (" + exported.size() + ")");
         reselect(draftList, selected);
         reselect(exportedList, selected);
         showSelection();
@@ -169,7 +213,7 @@ public final class SnapshotsTab extends JPanel {
     }
 
     private Entry selected() {
-        JList<Entry> list = lists.getSelectedIndex() == 0 ? draftList : exportedList;
+        JList<Entry> list = draftsTab.isSelected() ? draftList : exportedList;
         return list.getSelectedValue();
     }
 
