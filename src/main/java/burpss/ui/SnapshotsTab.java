@@ -63,6 +63,7 @@ public final class SnapshotsTab extends JPanel {
         lists.addTab("Drafts", new JScrollPane(draftList));
         lists.addTab("Exported", new JScrollPane(exportedList));
         lists.addChangeListener(e -> showSelection());
+        lists.putClientProperty("JTabbedPane.trailingComponent", help());
 
         JButton open = new JButton("Open");
         open.addActionListener(e -> withSelection(source::open));
@@ -76,15 +77,9 @@ public final class SnapshotsTab extends JPanel {
         left.add(lists, BorderLayout.CENTER);
         left.add(buttons, BorderLayout.SOUTH);
 
-        JLabel hint = new JLabel("Drafts keep your last 20 unexported snapshots. Copying or saving an image moves it to Exported. "
-                + "Everything is stored in the current Burp project.");
-        hint.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
-        hint.setForeground(UIManager.getColor("Label.disabledForeground"));
-
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, preview);
         split.setResizeWeight(0.3);
         split.setDividerLocation(420);
-        add(hint, BorderLayout.NORTH);
         add(split, BorderLayout.CENTER);
 
         addAncestorListener(new AncestorListener() {
@@ -92,6 +87,22 @@ public final class SnapshotsTab extends JPanel {
             public void ancestorRemoved(AncestorEvent e) { }
             public void ancestorMoved(AncestorEvent e) { }
         });
+    }
+
+    private static JComponent help() {
+        JButton help = new JButton("?");
+        help.putClientProperty("JButton.buttonType", "help");
+        help.setFocusable(false);
+        help.setToolTipText("<html><div style='width:260px'>Drafts keep your last 20 unexported snapshots. "
+                + "Copying or saving an image moves it to Exported. Everything is stored in the current Burp project.</div></html>");
+        JPanel trailing = new JPanel(new java.awt.GridBagLayout());
+        trailing.setOpaque(false);
+        trailing.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 8));
+        java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
+        c.weightx = 1;
+        c.anchor = java.awt.GridBagConstraints.EAST;
+        trailing.add(help, c);
+        return trailing;
     }
 
     public void refresh() {
