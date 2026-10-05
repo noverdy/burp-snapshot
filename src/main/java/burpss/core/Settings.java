@@ -1,7 +1,12 @@
 package burpss.core;
 
+import java.io.IOException;
+import java.io.StringReader;
+import java.io.StringWriter;
+import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.util.Properties;
 
 public final class Settings {
 
@@ -79,6 +84,53 @@ public final class Settings {
             } catch (IllegalArgumentException | IllegalAccessException ignored) {
             }
         }
+    }
+
+    public Settings copy() {
+        Settings copy = new Settings();
+        copy.copyFrom(this);
+        return copy;
+    }
+
+    public void copyFrom(Settings other) {
+        for (Field f : persistentFields()) {
+            try {
+                f.set(this, f.get(other));
+            } catch (IllegalAccessException ignored) {
+            }
+        }
+    }
+
+    public String encode() {
+        Properties values = new Properties();
+        save(store(values));
+        StringWriter out = new StringWriter();
+        try {
+            values.store(out, null);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return out.toString();
+    }
+
+    public static Settings decode(String encoded, Settings fallback) {
+        Settings settings = fallback.copy();
+        if (encoded == null) return settings;
+        Properties values = new Properties();
+        try {
+            values.load(new StringReader(encoded));
+        } catch (IOException e) {
+            return settings;
+        }
+        settings.load(store(values));
+        return settings;
+    }
+
+    private static Store store(Properties values) {
+        return new Store() {
+            public String get(String key) { return values.getProperty(key); }
+            public void set(String key, String value) { values.setProperty(key, value); }
+        };
     }
 
     public void save(Store store) {

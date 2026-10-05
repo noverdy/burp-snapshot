@@ -100,7 +100,7 @@ public final class SnapshotExtension implements BurpExtension {
             SnapshotLibrary.Table t = library.table(id);
             List<HttpRequestResponse> items = library.items(id);
             List<Long> times = library.times(id);
-            TableWindow window = new TableWindow(t.rows(), t.method(), t.url(), t.host(), settings(), store());
+            TableWindow window = new TableWindow(t.rows(), t.method(), t.url(), t.host(), t.settings(), store());
             window.restore(t.state());
             window.onUpdate(u -> library.saveTable(id, items, times, t.method(), t.url(), t.host(), u));
             show(window);
@@ -108,7 +108,7 @@ public final class SnapshotExtension implements BurpExtension {
         }
         Exchange exchange = library.exchange(id);
         HttpRequestResponse item = library.item(id);
-        ExchangeWindow window = new ExchangeWindow(List.of(exchange), settings(), store());
+        ExchangeWindow window = new ExchangeWindow(List.of(exchange), library.settings(id), store());
         window.onUpdate(u -> library.saveExchange(id, item, exchange, u));
         show(window);
     }

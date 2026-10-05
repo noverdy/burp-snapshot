@@ -26,18 +26,23 @@ public final class ExchangeWindow extends EditorWindow {
 
     private final List<Exchange> exchanges;
     private Exchange current;
+    private final List<Settings> itemSettings = new java.util.ArrayList<>();
     private ExchangeContent content;
 
     public ExchangeWindow(List<Exchange> exchanges, Settings settings, Settings.Store store) {
         super("Snapshot", settings, store, false);
         this.exchanges = exchanges;
         this.current = exchanges.get(0);
+        exchanges.forEach(e -> itemSettings.add(settings.copy()));
         if (exchanges.size() > 1) {
             JComboBox<String> picker = new JComboBox<>(exchanges.stream().map(Exchange::label).toArray(String[]::new));
             picker.setMaximumSize(new java.awt.Dimension(520, picker.getPreferredSize().height));
             picker.addActionListener(e -> {
                 flush();
+                itemSettings.set(item(), settings.copy());
                 current = exchanges.get(picker.getSelectedIndex());
+                settings.copyFrom(itemSettings.get(item()));
+                reloadSettings();
                 syncTitleField();
                 rebuild();
             });

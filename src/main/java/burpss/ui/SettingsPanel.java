@@ -50,10 +50,12 @@ final class SettingsPanel extends JPanel {
 
     private final Settings s;
     private final Runnable onChange;
+    private final Runnable onPreference;
     private JPanel body;
     private final java.util.List<JLabel> captions = new java.util.ArrayList<>();
 
-    SettingsPanel(Settings settings, boolean table, Runnable onChange) {
+    SettingsPanel(Settings settings, boolean table, Runnable onChange, Runnable onPreference) {
+        this.onPreference = onPreference;
         this.s = settings;
         this.onChange = onChange;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
@@ -147,7 +149,7 @@ final class SettingsPanel extends JPanel {
                 else opened.remove(title);
                 opened.remove("");
                 s.openSections = String.join(",", opened);
-                onChange.run();
+                onPreference.run();
                 label.run();
                 revalidate();
             });
@@ -227,7 +229,7 @@ final class SettingsPanel extends JPanel {
             b.setSelected(i == s.markColor);
             b.addActionListener(e -> {
                 s.markColor = index;
-                onChange.run();
+                onPreference.run();
             });
             buttons.add(b);
             group.add(b);

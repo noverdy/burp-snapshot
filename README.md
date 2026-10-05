@@ -80,14 +80,14 @@ Snapshot saves your work to the Burp project as you edit, so closing the window 
 
 Double-click an entry to keep editing it. Editing an exported snapshot updates it in place. Opening a request without changing anything doesn't create a draft.
 
-The project stores the request, the response and your edits (marks, notes, redactions, hidden headers, title), not the rendered image. The tab renders a fresh preview when you select an entry.
+The project stores the request, the response, your edits (marks, notes, redactions, hidden headers, title) and that snapshot's settings, not the rendered image. Each snapshot keeps its own theme, layout, redaction rules and watermark, so changing them for a new snapshot leaves older ones alone. The tab renders a fresh preview when you select an entry.
 
 > [!NOTE]
 > Burp Community only has temporary projects, so drafts and exported snapshots are gone once Burp closes.
 
 ### Settings
 
-The sidebar keeps the per-screenshot options at the top: theme, layout, mark color, note style, redaction style, watermark text and export scale. Redaction rules, hidden headers, body truncation, line wrapping and watermark styling sit in collapsible sections below. Snapshot stores everything in Burp's preferences, so your choices carry over between projects.
+The sidebar keeps the per-screenshot options at the top: theme, layout, mark color, note style, redaction style, watermark text and export scale. Redaction rules, hidden headers, body truncation, line wrapping and watermark styling sit in collapsible sections below. Settings belong to each snapshot. New snapshots start with the settings you used last, which Snapshot keeps in Burp's preferences across projects.
 
 Response time comes from Burp's timing data when it exists. Otherwise the extension times requests itself while loaded, so a Repeater response sent before you loaded Snapshot has no time to show. Send it once more.
 

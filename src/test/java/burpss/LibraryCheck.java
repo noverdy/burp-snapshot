@@ -69,7 +69,7 @@ public final class LibraryCheck {
             ids.add(id);
             EditState s = new EditState();
             s.title = "draft " + i;
-            library.saveExchange(id, item, exchange, new EditorWindow.Update(0, s, false));
+            library.saveExchange(id, item, exchange, new EditorWindow.Update(0, s, new Settings(), false));
             Thread.sleep(3);
         }
         List<SnapshotsTab.Entry> entries = library.entries();
@@ -78,10 +78,10 @@ public final class LibraryCheck {
 
         String kept = ids.get(22);
         EditState exported = state.copy();
-        library.saveExchange(kept, item, exchange, new EditorWindow.Update(0, exported, true));
+        library.saveExchange(kept, item, exchange, new EditorWindow.Update(0, exported, new Settings(), true));
         exported.title = "IDOR edited";
         Thread.sleep(3);
-        library.saveExchange(kept, item, exchange, new EditorWindow.Update(0, exported, false));
+        library.saveExchange(kept, item, exchange, new EditorWindow.Update(0, exported, new Settings(), false));
         SnapshotsTab.Entry entry = library.entries().stream().filter(e -> e.id().equals(kept)).findFirst().orElseThrow();
         check("exported stays exported after a later edit, updated in place", entry.exported() && entry.title().equals("IDOR edited")
                 && library.entries().size() == SnapshotLibrary.MAX_DRAFTS);
@@ -89,7 +89,7 @@ public final class LibraryCheck {
         for (int i = 0; i < 25; i++) {
             EditState s = new EditState();
             s.title = "more " + i;
-            library.saveExchange(SnapshotLibrary.newId(), item, exchange, new EditorWindow.Update(0, s, false));
+            library.saveExchange(SnapshotLibrary.newId(), item, exchange, new EditorWindow.Update(0, s, new Settings(), false));
             Thread.sleep(2);
         }
         check("exported entries are never pruned", library.entries().stream().anyMatch(e -> e.id().equals(kept))
@@ -107,12 +107,50 @@ public final class LibraryCheck {
         String tableId = SnapshotLibrary.newId();
         EditState tableState = new EditState();
         tableState.payloadOverrides.put(2, "renamed");
-        library.saveTable(tableId, items, List.of(10L, 20L, 30L), "POST", "https://h/login", "h", new EditorWindow.Update(0, tableState, true));
+        library.saveTable(tableId, items, List.of(10L, 20L, 30L), "POST", "https://h/login", "h", new EditorWindow.Update(0, tableState, new Settings(), true));
         SnapshotLibrary.Table table = library.table(tableId);
         check("table reopen keeps rows, diffed payloads and state", library.isTable(tableId) && table.rows().size() == 3
                 && table.rows().get(0).payload().equals("admin") && table.rows().get(2).timeMs() == 30
                 && table.state().payloadOverrides.get(2).equals("renamed"));
         check("table preview renders", library.preview(tableId).getWidth() > 300);
+
+        Settings dark = new Settings();
+        dark.theme = Settings.ThemeName.DARK;
+        dark.layout = Settings.Layout.STACKED;
+        String darkId = SnapshotLibrary.newId();
+        library.saveExchange(darkId, item, exchange, new EditorWindow.Update(0, new EditState(), dark, true));
+        Settings light = new Settings();
+        library.saveExchange(SnapshotLibrary.newId(), item, exchange, new EditorWindow.Update(0, new EditState(), light, false));
+        java.awt.image.BufferedImage darkPreview = library.preview(darkId);
+        check("each entry keeps its own settings", library.settings(darkId).theme == Settings.ThemeName.DARK
+                && library.settings(darkId).layout == Settings.Layout.STACKED
+                && new java.awt.Color(darkPreview.getRGB(5, darkPreview.getHeight() / 2)).getRed() < 80);
+
+        List<EditorWindow.Update> updates = new ArrayList<>();
+        java.util.Map<String, String> prefs = new HashMap<>();
+        Settings.Store store = new Settings.Store() {
+            public String get(String key) { return prefs.get(key); }
+            public void set(String key, String value) { prefs.put(key, value); }
+        };
+        burpss.ui.ExchangeWindow[] window = new burpss.ui.ExchangeWindow[1];
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            window[0] = new burpss.ui.ExchangeWindow(List.of(exchange), new Settings(), store);
+            window[0].onUpdate(updates::add);
+            window[0].open(null);
+            click(window[0], "Purple");
+            click(window[0], "▸  Content");
+        });
+        Thread.sleep(1200);
+        check("mark color and sidebar sections don't create a draft", updates.isEmpty());
+        javax.swing.SwingUtilities.invokeAndWait(() -> click(window[0], "Dark"));
+        Thread.sleep(1200);
+        check("changing only a setting autosaves a draft with that setting", updates.size() == 1
+                && !updates.get(0).exported() && updates.get(0).settings().theme == Settings.ThemeName.DARK);
+        javax.swing.SwingUtilities.invokeAndWait(() -> click(window[0], "Light"));
+        javax.swing.SwingUtilities.invokeAndWait(() -> window[0].dispose());
+        Thread.sleep(200);
+        check("closing the window saves pending edits right away", updates.size() == 2
+                && updates.get(1).settings().theme == Settings.ThemeName.LIGHT);
 
         capture(library);
         library.delete(kept);
@@ -140,6 +178,16 @@ public final class LibraryCheck {
             }
             frame.dispose();
         });
+    }
+
+    private static void click(java.awt.Container root, String text) {
+        for (java.awt.Component c : root.getComponents()) {
+            if (c instanceof javax.swing.AbstractButton b && (text.equals(b.getText()) || text.equals(b.getToolTipText()))) {
+                b.doClick();
+                return;
+            }
+            if (c instanceof java.awt.Container child) click(child, text);
+        }
     }
 
     private static int failures;

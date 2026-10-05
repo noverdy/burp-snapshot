@@ -33,20 +33,23 @@ import java.util.function.Supplier;
 final class SnapshotLibrary implements SnapshotsTab.Source {
 
     static final int MAX_DRAFTS = 20;
-    private static final String EXCHANGE = "exchange", TABLE = "table";
+    private static final String EXCHANGE = "exchange", TABLE = "table", PREFIX = "snapshot.";
 
-    record Table(List<ResultRow> rows, String method, String url, String host, EditState state) {
+    record Table(List<ResultRow> rows, String method, String url, String host, EditState state, Settings settings) {
     }
 
-    private final PersistedObject root;
-    private final Supplier<Settings> settings;
+    private final PersistedObject project;
+    private final Supplier<Settings> defaults;
     private Consumer<String> opener = id -> { };
     private Runnable onChange = () -> { };
 
-    SnapshotLibrary(PersistedObject projectData, Supplier<Settings> settings) {
-        if (projectData.getChildObject("snapshots") == null) projectData.setChildObject("snapshots", PersistedObject.persistedObject());
-        this.root = projectData.getChildObject("snapshots");
-        this.settings = settings;
+    SnapshotLibrary(PersistedObject projectData, Supplier<Settings> defaults) {
+        this.project = projectData;
+        this.defaults = defaults;
+    }
+
+    private PersistedObject entry(String id) {
+        return project.getChildObject(PREFIX + id);
     }
 
     void onOpen(Consumer<String> opener) {
@@ -91,7 +94,7 @@ final class SnapshotLibrary implements SnapshotsTab.Source {
     }
 
     private void save(String id, EditorWindow.Update update, Consumer<PersistedObject> content) {
-        PersistedObject entry = root.getChildObject(id);
+        PersistedObject entry = entry(id);
         long now = System.currentTimeMillis();
         if (entry == null) {
             entry = PersistedObject.persistedObject();
@@ -102,36 +105,41 @@ final class SnapshotLibrary implements SnapshotsTab.Source {
         if (update.exported()) entry.setString("status", "exported");
         entry.setString("title", update.state().title);
         entry.setString("state", Base64.getEncoder().encodeToString(StateCodec.encode(update.state())));
+        entry.setString("settings", update.settings().encode());
         entry.setLong("updated", now);
-        root.setChildObject(id, entry);
+        project.setChildObject(PREFIX + id, entry);
         pruneDrafts();
         onChange.run();
     }
 
     private void pruneDrafts() {
         List<SnapshotsTab.Entry> drafts = entries().stream().filter(e -> !e.exported()).toList();
-        for (int i = MAX_DRAFTS; i < drafts.size(); i++) root.deleteChildObject(drafts.get(i).id());
+        for (int i = MAX_DRAFTS; i < drafts.size(); i++) project.deleteChildObject(PREFIX + drafts.get(i).id());
     }
 
     boolean isTable(String id) {
-        PersistedObject entry = root.getChildObject(id);
+        PersistedObject entry = entry(id);
         return entry != null && TABLE.equals(entry.getString("kind"));
     }
 
     HttpRequestResponse item(String id) {
-        return root.getChildObject(id).getHttpRequestResponse("item");
+        return entry(id).getHttpRequestResponse("item");
     }
 
     List<HttpRequestResponse> items(String id) {
-        return new ArrayList<>(root.getChildObject(id).getHttpRequestResponseList("items"));
+        return new ArrayList<>(entry(id).getHttpRequestResponseList("items"));
     }
 
     List<Long> times(String id) {
-        return new ArrayList<>(root.getChildObject(id).getLongList("times"));
+        return new ArrayList<>(entry(id).getLongList("times"));
+    }
+
+    Settings settings(String id) {
+        return Settings.decode(entry(id).getString("settings"), defaults.get());
     }
 
     Exchange exchange(String id) {
-        PersistedObject entry = root.getChildObject(id);
+        PersistedObject entry = entry(id);
         HttpRequestResponse item = entry.getHttpRequestResponse("item");
         HttpResponse response = item.response();
         Exchange exchange = new Exchange(
@@ -144,8 +152,9 @@ final class SnapshotLibrary implements SnapshotsTab.Source {
     }
 
     Table table(String id) {
-        PersistedObject entry = root.getChildObject(id);
-        return new Table(rows(items(id), times(id)), entry.getString("method"), entry.getString("url"), entry.getString("host"), state(entry));
+        PersistedObject entry = entry(id);
+        return new Table(rows(items(id), times(id)), entry.getString("method"), entry.getString("url"), entry.getString("host"),
+                state(entry), settings(id));
     }
 
     static List<ResultRow> rows(List<HttpRequestResponse> items, List<Long> times) {
@@ -174,8 +183,10 @@ final class SnapshotLibrary implements SnapshotsTab.Source {
     @Override
     public List<SnapshotsTab.Entry> entries() {
         List<SnapshotsTab.Entry> out = new ArrayList<>();
-        for (String id : root.childObjectKeys()) {
-            PersistedObject entry = root.getChildObject(id);
+        for (String key : project.childObjectKeys()) {
+            if (!key.startsWith(PREFIX)) continue;
+            String id = key.substring(PREFIX.length());
+            PersistedObject entry = project.getChildObject(key);
             String detail = entry.getString("method") + " " + entry.getString("url");
             if (TABLE.equals(entry.getString("kind"))) detail = "Results table · " + detail;
             Long updated = entry.getLong("updated");
@@ -188,8 +199,8 @@ final class SnapshotLibrary implements SnapshotsTab.Source {
 
     @Override
     public BufferedImage preview(String id) {
-        if (root.getChildObject(id) == null) return null;
-        Settings s = settings.get();
+        if (entry(id) == null) return null;
+        Settings s = settings(id);
         Theme theme = Theme.of(s);
         if (isTable(id)) {
             Table t = table(id);
@@ -208,7 +219,7 @@ final class SnapshotLibrary implements SnapshotsTab.Source {
 
     @Override
     public void delete(String id) {
-        root.deleteChildObject(id);
+        project.deleteChildObject(PREFIX + id);
         onChange.run();
     }
 }

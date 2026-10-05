@@ -56,13 +56,14 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
 
     enum Tool { MARK, REDACT }
 
-    public record Update(int item, EditState state, boolean exported) {
+    public record Update(int item, EditState state, Settings settings, boolean exported) {
     }
 
     protected final Settings settings;
     private final Settings.Store store;
     protected final Canvas canvas = new Canvas(this);
-    private final SettingsPanel settingsPanel;
+    private final boolean table;
+    private JScrollPane sidebar;
     private final JTextField titleField = new JTextField(40);
     private final JComboBox<String> zoom = new JComboBox<>(new String[]{"Fit", "50%", "75%", "100%", "150%", "200%"});
     private final JLabel status = new JLabel(" ");
@@ -81,7 +82,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         super(title);
         this.settings = settings;
         this.store = store;
-        this.settingsPanel = new SettingsPanel(settings, table, this::settingsChanged);
+        this.table = table;
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         autosave.setRepeats(false);
         addWindowListener(new WindowAdapter() {
@@ -104,8 +105,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
 
         getContentPane().setLayout(new BorderLayout());
         getContentPane().add(toolbar, BorderLayout.NORTH);
-        JScrollPane sidebar = settingsPanel.scrollable();
-        sidebar.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, UIManager.getColor("Separator.foreground")));
+        sidebar = sidebar();
         getContentPane().add(canvasScroll, BorderLayout.CENTER);
         getContentPane().add(sidebar, BorderLayout.EAST);
         getContentPane().add(buildFooter(), BorderLayout.SOUTH);
@@ -172,7 +172,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     private void publish(boolean exported) {
         dirty = false;
         autosave.stop();
-        onUpdate.accept(new Update(item(), state().copy(), exported));
+        onUpdate.accept(new Update(item(), state().copy(), settings.copy(), exported));
     }
 
     void syncTitleField() {
@@ -181,9 +181,23 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         syncingTitle = false;
     }
 
+    private JScrollPane sidebar() {
+        JScrollPane pane = new SettingsPanel(settings, table, this::settingsChanged, () -> settings.save(store)).scrollable();
+        pane.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, UIManager.getColor("Separator.foreground")));
+        return pane;
+    }
+
+    void reloadSettings() {
+        getContentPane().remove(sidebar);
+        sidebar = sidebar();
+        getContentPane().add(sidebar, BorderLayout.EAST);
+        getContentPane().revalidate();
+    }
+
     private void settingsChanged() {
         settings.save(store);
         rebuild();
+        changed();
     }
 
     private static double parseZoom(Object value) {
