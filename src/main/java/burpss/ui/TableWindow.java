@@ -31,6 +31,10 @@ public final class TableWindow extends EditorWindow {
     }
 
     @Override EditState state() { return state; }
+
+    public void restore(EditState saved) {
+        state.restore(saved);
+    }
     @Override History history() { return history; }
 
     @Override

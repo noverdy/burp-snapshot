@@ -17,6 +17,7 @@ A Burp Suite extension that turns a request and response into a clean PNG for yo
 - A tiled watermark with `{date}` and `{host}` placeholders and an optional logo.
 - Intruder results as a table, with the payloads worked out from the selected requests.
 - Copy to the clipboard or save a PNG at 1x, 2x or 3x.
+- Autosave into the Burp project, with a **Snapshot** tab to reopen drafts and exported snapshots.
 
 > [!IMPORTANT]
 > The extension redacts text before it draws anything. Real characters never reach the image, and the blur is painted over random placeholder text, so nobody can un-blur it.
@@ -69,6 +70,20 @@ Type a string in the **Contains** box to add a ✓/✗ column, similar to Burp's
 
 > [!NOTE]
 > Burp doesn't share Intruder's payload columns with extensions. Snapshot compares the selected requests to find the payloads, including attacks with more than one payload position. If a label comes out wrong, fix it with **Edit payload…**
+
+### Drafts and exported snapshots
+
+Snapshot saves your work to the Burp project as you edit, so closing the window by accident doesn't lose anything. The **Snapshot** tab in Burp's top bar lists two kinds of entries:
+
+- **Drafts** are snapshots you changed but haven't copied or saved yet. The tab keeps the 20 most recent.
+- **Exported** are snapshots you copied or saved at least once. These are never removed automatically.
+
+Double-click an entry to keep editing it. Editing an exported snapshot updates it in place. Opening a request without changing anything doesn't create a draft.
+
+The project stores the request, the response and your edits (marks, notes, redactions, hidden headers, title), not the rendered image. The tab renders a fresh preview when you select an entry.
+
+> [!NOTE]
+> Burp Community only has temporary projects, so drafts and exported snapshots are gone once Burp closes.
 
 ### Settings
 

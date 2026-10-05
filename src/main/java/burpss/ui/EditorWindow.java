@@ -41,6 +41,9 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.util.function.Consumer;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.InputEvent;
@@ -52,6 +55,9 @@ import java.io.IOException;
 public abstract class EditorWindow extends JFrame implements Canvas.Handler {
 
     enum Tool { MARK, REDACT }
+
+    public record Update(int item, EditState state, boolean exported) {
+    }
 
     protected final Settings settings;
     private final Settings.Store store;
@@ -66,6 +72,9 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     private String logoPath;
     private Image logo;
     private boolean syncingTitle;
+    private final Timer autosave = new Timer(800, e -> flush());
+    private Consumer<Update> onUpdate = update -> { };
+    private boolean dirty;
     private boolean syncingZoom;
 
     EditorWindow(String title, Settings settings, Settings.Store store, boolean table) {
@@ -74,6 +83,13 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         this.store = store;
         this.settingsPanel = new SettingsPanel(settings, table, this::settingsChanged);
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+        autosave.setRepeats(false);
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosed(WindowEvent e) {
+                flush();
+            }
+        });
         buildToolbar(!table);
 
         JScrollPane canvasScroll = new JScrollPane(canvas, JScrollPane.VERTICAL_SCROLLBAR_ALWAYS, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
@@ -133,6 +149,30 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         history().checkpoint();
         mutation.run();
         rebuild();
+        changed();
+    }
+
+    public void onUpdate(Consumer<Update> listener) {
+        onUpdate = listener;
+    }
+
+    int item() {
+        return 0;
+    }
+
+    void flush() {
+        if (dirty) publish(false);
+    }
+
+    private void changed() {
+        dirty = true;
+        autosave.restart();
+    }
+
+    private void publish(boolean exported) {
+        dirty = false;
+        autosave.stop();
+        onUpdate.accept(new Update(item(), state().copy(), exported));
     }
 
     void syncTitleField() {
@@ -280,12 +320,14 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     private void afterHistory() {
         syncTitleField();
         rebuild();
+        changed();
     }
 
     private void copyImage() {
         try {
             ImageExport.copy(scene.toImage(settings.exportScale));
             flash("Copied to clipboard");
+            publish(true);
         } catch (IOException | IllegalStateException e) {
             flash("Copy failed: " + e.getMessage());
         }
@@ -295,6 +337,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         if (ImageExport.save(this, scene.toImage(settings.exportScale), settings, fileName())) {
             settings.save(store);
             flash("Saved");
+            publish(true);
         }
     }
 
@@ -352,6 +395,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     public void calloutMoved(int markIndex, Point2D offset) {
         state().marks.get(markIndex).calloutOffset = offset;
         rebuild();
+        changed();
     }
 
     @Override

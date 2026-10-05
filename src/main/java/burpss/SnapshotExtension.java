@@ -14,12 +14,11 @@ import burpss.core.DecodedText;
 import burpss.core.Exchange;
 import burpss.core.HttpText;
 import burpss.core.Mark;
-import burpss.core.PayloadDiff;
-import burpss.core.ResultRow;
 import burpss.core.Settings;
 import burpss.render.Fonts;
 import burpss.ui.EditorWindow;
 import burpss.ui.ExchangeWindow;
+import burpss.ui.SnapshotsTab;
 import burpss.ui.TableWindow;
 
 import javax.swing.JMenuItem;
@@ -30,6 +29,7 @@ import java.util.List;
 public final class SnapshotExtension implements BurpExtension {
 
     private MontoyaApi api;
+    private SnapshotLibrary library;
     private final ResponseTimer timer = new ResponseTimer();
 
     @Override
@@ -38,6 +38,11 @@ public final class SnapshotExtension implements BurpExtension {
         api.extension().setName("Snapshot");
         Fonts.use(api.userInterface().currentEditorFont(), api.userInterface().currentDisplayFont());
         api.http().registerHttpHandler(timer);
+        library = new SnapshotLibrary(api.persistence().extensionData(), this::settings);
+        SnapshotsTab tab = new SnapshotsTab(library);
+        library.onChange(tab::refresh);
+        library.onOpen(this::reopen);
+        api.userInterface().registerSuiteTab("Snapshot", tab);
         api.userInterface().registerContextMenuItemsProvider(new ContextMenuItemsProvider() {
             @Override
             public List<Component> provideMenuItems(ContextMenuEvent event) {
@@ -65,28 +70,47 @@ public final class SnapshotExtension implements BurpExtension {
     }
 
     private void openExchanges(ContextMenuEvent event) {
+        List<HttpRequestResponse> items = new ArrayList<>();
         List<Exchange> exchanges = new ArrayList<>();
-        event.messageEditorRequestResponse().ifPresentOrElse(
-                editor -> exchanges.add(withSelection(toExchange(editor.requestResponse(), event.selectedRequestResponses()), editor)),
-                () -> event.selectedRequestResponses().forEach(rr -> exchanges.add(toExchange(rr, List.of()))));
-        show(new ExchangeWindow(exchanges, settings(), store()));
+        event.messageEditorRequestResponse().ifPresentOrElse(editor -> {
+            items.add(editor.requestResponse());
+            exchanges.add(withSelection(toExchange(editor.requestResponse(), event.selectedRequestResponses()), editor));
+        }, () -> event.selectedRequestResponses().forEach(rr -> {
+            items.add(rr);
+            exchanges.add(toExchange(rr, List.of()));
+        }));
+        List<String> ids = items.stream().map(rr -> SnapshotLibrary.newId()).toList();
+        ExchangeWindow window = new ExchangeWindow(exchanges, settings(), store());
+        window.onUpdate(u -> library.saveExchange(ids.get(u.item()), items.get(u.item()), exchanges.get(u.item()), u));
+        show(window);
     }
 
     private void openTable(List<HttpRequestResponse> selected) {
-        List<String> requests = selected.stream().map(rr -> decode(rr.request().toByteArray().getBytes())).toList();
-        List<String> payloads = PayloadDiff.labels(requests);
-        List<ResultRow> rows = new ArrayList<>();
-        for (int i = 0; i < selected.size(); i++) {
-            HttpRequestResponse rr = selected.get(i);
-            HttpResponse response = rr.response();
-            rows.add(new ResultRow(i + 1, payloads.get(i),
-                    response == null ? 0 : response.statusCode(),
-                    response == null ? 0 : response.toByteArray().length(),
-                    timeMs(rr, List.of()),
-                    response == null ? "" : decode(response.toByteArray().getBytes())));
-        }
+        List<Long> times = selected.stream().map(rr -> timeMs(rr, List.of())).toList();
         HttpRequest first = selected.get(0).request();
-        show(new TableWindow(rows, first.method(), first.url(), first.httpService().host(), settings(), store()));
+        String id = SnapshotLibrary.newId();
+        TableWindow window = new TableWindow(SnapshotLibrary.rows(selected, times), first.method(), first.url(),
+                first.httpService().host(), settings(), store());
+        window.onUpdate(u -> library.saveTable(id, selected, times, first.method(), first.url(), first.httpService().host(), u));
+        show(window);
+    }
+
+    private void reopen(String id) {
+        if (library.isTable(id)) {
+            SnapshotLibrary.Table t = library.table(id);
+            List<HttpRequestResponse> items = library.items(id);
+            List<Long> times = library.times(id);
+            TableWindow window = new TableWindow(t.rows(), t.method(), t.url(), t.host(), settings(), store());
+            window.restore(t.state());
+            window.onUpdate(u -> library.saveTable(id, items, times, t.method(), t.url(), t.host(), u));
+            show(window);
+            return;
+        }
+        Exchange exchange = library.exchange(id);
+        HttpRequestResponse item = library.item(id);
+        ExchangeWindow window = new ExchangeWindow(List.of(exchange), settings(), store());
+        window.onUpdate(u -> library.saveExchange(id, item, exchange, u));
+        show(window);
     }
 
     private void show(EditorWindow window) {
@@ -132,7 +156,7 @@ public final class SnapshotExtension implements BurpExtension {
     }
 
     private static String decode(byte[] bytes) {
-        return DecodedText.decode(bytes).text();
+        return SnapshotLibrary.decode(bytes);
     }
 
     private Settings settings() {

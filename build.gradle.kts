@@ -11,6 +11,7 @@ repositories {
 
 dependencies {
     compileOnly("net.portswigger.burp.extensions:montoya-api:2026.7")
+    testImplementation("net.portswigger.burp.extensions:montoya-api:2026.7")
 }
 
 tasks.withType<JavaCompile> {
@@ -44,4 +45,9 @@ tasks.register<JavaExec>("demo") {
     classpath = sourceSets["test"].runtimeClasspath + files(burpJar)
     mainClass.set("burpss.ui.DemoRecorder")
     args(layout.buildDirectory.file("demo/snapshot-demo.mp4").get().asFile.absolutePath)
+}
+
+tasks.register<JavaExec>("libraryCheck") {
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("burpss.LibraryCheck")
 }

@@ -36,6 +36,7 @@ public final class ExchangeWindow extends EditorWindow {
             JComboBox<String> picker = new JComboBox<>(exchanges.stream().map(Exchange::label).toArray(String[]::new));
             picker.setMaximumSize(new java.awt.Dimension(520, picker.getPreferredSize().height));
             picker.addActionListener(e -> {
+                flush();
                 current = exchanges.get(picker.getSelectedIndex());
                 syncTitleField();
                 rebuild();
@@ -46,6 +47,7 @@ public final class ExchangeWindow extends EditorWindow {
     }
 
     @Override EditState state() { return current.state; }
+    @Override int item() { return exchanges.indexOf(current); }
     @Override History history() { return current.history; }
 
     @Override
