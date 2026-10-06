@@ -19,7 +19,10 @@ import burpss.core.ResultRow;
 import burpss.core.Settings;
 import burpss.core.Shortcuts;
 import burpss.core.StateCodec;
+import burpss.core.Template;
+import burpss.core.Templates;
 import burpss.core.TextRange;
+import burpss.core.Token;
 import burpss.render.DisplayText;
 import burpss.render.ExchangeContent;
 import burpss.render.TableContent;
@@ -153,7 +156,7 @@ public final class LibraryCheck {
         };
         ExchangeWindow[] window = new ExchangeWindow[1];
         javax.swing.SwingUtilities.invokeAndWait(() -> {
-            window[0] = new ExchangeWindow(List.of(exchange), new Settings(), store);
+            window[0] = new ExchangeWindow(null, List.of(exchange), new Settings(), store);
             window[0].onUpdate(updates::add);
             window[0].open(null);
             click(window[0], "Purple");
@@ -270,6 +273,113 @@ public final class LibraryCheck {
         List<Rectangle2D> parts = wrapContent.segments(new Anchor.Text(0, at, wrapped.indexOf("&order")));
         check("a value that wraps is outlined per visual line, not as one box over both lines",
                 parts.size() == 2 && parts.get(1).getX() < parts.get(0).getX());
+
+        byte[] huge = ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"a\":\"" + "é".repeat(SnapshotLibrary.MAX_MESSAGE_BYTES))
+                .getBytes(StandardCharsets.UTF_8);
+        String capped = SnapshotLibrary.decode(huge);
+        check("huge messages are cut at a character boundary with a note",
+                capped.length() < SnapshotLibrary.MAX_MESSAGE_BYTES && !capped.contains("�") && !capped.contains("Ã")
+                        && capped.endsWith("more bytes not shown") && HttpText.parse(capped, false).bodyKind() == HttpText.BodyKind.JSON);
+        Exchange big = new Exchange(HttpText.parse("GET / HTTP/1.1\r\nHost: a\r\n\r\n", true), HttpText.parse(capped, false),
+                "GET", "https://a/", "a", 200, "OK", 5);
+        check("a capped huge response still renders", SnapshotLibrary.render(big, new Settings(), 1).getHeight() > 0);
+
+        String firstRequest = "GET /api/projects/1337?view=full HTTP/1.1\r\nHost: a.test\r\nAuthorization: Bearer one\r\nX-Trace: 1\r\n\r\n";
+        String firstResponse = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"id\": 1337, \"owner\": \"alice\", \"members\": [{\"email\": \"b@x\"}, {\"email\": \"c@x\"}]}";
+        Exchange first = new Exchange(HttpText.parse(firstRequest, true), HttpText.parse(firstResponse, false),
+                "GET", "https://a.test/api/projects/1337?view=full", "a.test", 200, "OK", 5);
+        HttpText firstBody = first.response;
+        int owner = firstResponse.indexOf("\"owner\""), secondEmail = firstResponse.lastIndexOf("\"email\"");
+        Token ownerToken = firstBody.tokenAt(owner + 1), emailToken = firstBody.tokenAt(secondEmail + 1);
+        Mark ownerMark = new Mark(new Anchor.Text(1, ownerToken.start(), ownerToken.end()), 3);
+        ownerMark.note = "someone else's project";
+        first.state.marks.add(ownerMark);
+        first.state.marks.add(new Mark(new Anchor.Text(1, emailToken.start(), emailToken.end()), 1));
+        Token view = first.request.tokens().stream().filter(t -> t.name().equals("view")).findFirst().orElseThrow();
+        first.state.manualRedactions.get(0).add(new TextRange(view.valueStart(), view.valueEnd()));
+        first.state.toggledHeaders.get(0).add(first.request.headers().stream().filter(h -> h.name().equals("X-Trace")).findFirst().orElseThrow().lineStart());
+        first.state.title = "IDOR on /api/projects/1337";
+        Template captured = Templates.capture(first);
+        captured.title = Template.generalize(captured.title, "GET", "/api/projects/1337", "a.test", 200);
+        captured.name = "IDOR";
+        Template stored = Template.decode(captured.encode());
+
+        String nextRequest = "GET /api/projects/42?view=summary HTTP/1.1\r\nX-Trace: 9\r\nHost: b.test\r\n\r\n";
+        String nextResponse = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"id\": 42, \"members\": [{\"email\": \"d@x\"}, {\"email\": \"e@x\"}, {\"email\": \"f@x\"}], \"owner\": \"bob\"}";
+        Exchange next = new Exchange(HttpText.parse(nextRequest, true), HttpText.parse(nextResponse, false),
+                "GET", "https://b.test/api/projects/42?view=summary", "b.test", 200, "OK", 5);
+        Templates.Applied applied = Templates.apply(stored, next, "/api/projects/42");
+        Anchor.Text ownerAt = (Anchor.Text) next.state.marks.get(0).anchor;
+        Anchor.Text emailAt = (Anchor.Text) next.state.marks.get(1).anchor;
+        TextRange viewAt = next.state.manualRedactions.get(0).get(0);
+        check("a template re-finds marks, redactions and headers by name in another request",
+                applied.missing().isEmpty() && next.state.marks.size() == 2
+                        && nextResponse.substring(ownerAt.start(), ownerAt.end()).startsWith("\"owner\"")
+                        && next.state.marks.get(0).note.equals("someone else's project") && next.state.marks.get(0).color == 3
+                        && nextResponse.substring(emailAt.start(), emailAt.end()).contains("e@x")
+                        && nextRequest.substring(viewAt.start(), viewAt.end()).equals("summary")
+                        && next.state.toggledHeaders.get(0).contains(nextRequest.indexOf("X-Trace"))
+                        && next.state.title.equals("IDOR on /api/projects/42"));
+        Exchange bare = new Exchange(HttpText.parse("GET / HTTP/1.1\r\nHost: c\r\n\r\n", true), null, "GET", "https://c/", "c", 0, "", -1);
+        Template partial = Template.decode(stored.encode());
+        partial.title = null;
+        bare.state.title = "keep me";
+        Templates.Applied missed = Templates.apply(partial, bare, "/");
+        check("a template skips what it can't find and leaves parts it doesn't include",
+                missed.missing().size() == 3 && bare.state.marks.isEmpty() && bare.state.title.equals("keep me"));
+        library.saveTemplate(stored);
+        Template renamed = library.templates().get(0);
+        renamed.name = "IDOR v2";
+        library.saveTemplate(renamed);
+        check("templates are stored in the project and can be renamed and deleted",
+                library.templates().size() == 1 && library.templates().get(0).name.equals("IDOR v2")
+                        && library.templates().get(0).marks.size() == 2 && library.entries().stream().noneMatch(e -> e.id().equals(stored.id)));
+        library.deleteTemplate(stored.id);
+        check("deleted templates are gone", library.templates().isEmpty());
+
+        StringBuilder longBody = new StringBuilder();
+        for (int line = 1; line <= 200; line++) longBody.append("line ").append(line).append(line == 150 ? " needle" : "").append('\n');
+        String longResponse = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n" + longBody;
+        Exchange longExchange = new Exchange(HttpText.parse("GET / HTTP/1.1\r\nHost: a\r\n\r\n", true), HttpText.parse(longResponse, false),
+                "GET", "https://a/", "a", 200, "OK", 1);
+        Settings tenLines = new Settings();
+        tenLines.maxBodyLines = 10;
+        int focus = ExchangeContent.focusOffset(longExchange, tenLines, 1, longResponse.indexOf("needle"));
+        longExchange.state.bodyOffset[1] = focus;
+        String centered = new ExchangeContent(longExchange, tenLines, Theme.LIGHT).visible(1).text();
+        check("a selection deep in the body is centered by the body offset",
+                focus == 144 && centered.contains(focus + " lines above") && centered.contains("line 150 needle")
+                        && !centered.contains("line 144\n") && centered.contains("line 154") && centered.contains("more lines"));
+        longExchange.state.bodyOffset[1] = 5000;
+        String clamped = new ExchangeContent(longExchange, tenLines, Theme.LIGHT).visible(1).text();
+        check("an offset past the end still shows the last lines", clamped.contains("line 200") && clamped.contains("190 lines above"));
+        check("a selection that is already visible keeps the offset at 0",
+                ExchangeContent.focusOffset(longExchange, tenLines, 1, longResponse.indexOf("line 3")) == 0);
+        EditState offsetState = new EditState();
+        offsetState.bodyOffset[0] = 7;
+        offsetState.bodyOffset[1] = 42;
+        EditState offsetBack = StateCodec.decode(StateCodec.encode(offsetState));
+        Template offsetTemplate = Templates.capture(longExchange);
+        offsetTemplate.settings = new Settings().encode();
+        Template offsetRestored = Template.decode(offsetTemplate.encode());
+        Exchange offsetTarget = new Exchange(HttpText.parse("GET / HTTP/1.1\r\nHost: a\r\n\r\n", true), HttpText.parse(longResponse, false),
+                "GET", "https://a/", "a", 200, "OK", 1);
+        Templates.apply(offsetRestored, offsetTarget, "/");
+        check("body offsets survive the codec, undo copies and templates with settings",
+                offsetBack.bodyOffset[0] == 7 && offsetBack.bodyOffset[1] == 42 && offsetState.copy().bodyOffset[1] == 42
+                        && offsetTarget.state.bodyOffset[1] == 5000);
+
+        check("minified HTML is indented, with inline styles and scripts formatted", formatted("text/html",
+                "<html><body><ul><li>one<li>two</ul><style>a{color:red}</style><script>if(x){y()}</script></body></html>").equals(
+                "<html>\n  <body>\n    <ul>\n      <li>\n        one\n      <li>\n        two\n    </ul>\n    <style>\n      a {\n        color:red\n      }\n"
+                        + "    </style>\n    <script>\n      if(x) {\n        y()\n      }\n    </script>\n  </body>\n</html>"));
+        check("XML elements with short text stay on one line", formatted("application/xml",
+                "<a><b id=\"1\">x</b><c/></a>").equals("<a>\n  <b id=\"1\">x</b>\n  <c/>\n</a>"));
+        check("CSS rules and declarations get their own lines", formatted("text/css",
+                ".a,.b{color:red;margin:0}@media x{.c{top:0}}").equals(".a, .b {\n  color:red;\n  margin:0\n}\n@media x {\n  .c {\n    top:0\n  }\n}"));
+        check("JS keeps strings, regexes and line breaks without semicolons intact", formatted("application/javascript",
+                "var s='{;}',r=/[/]{2}/g;try{a()}catch(e){b()}\nconst c = 1\nfoo()").equals(
+                "var s='{;}', r=/[/]{2}/g;\ntry {\n  a()\n} catch(e) {\n  b()\n}\nconst c = 1\nfoo()"));
         System.out.println(failures == 0 ? "ALL PASSED" : failures + " FAILED");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -306,6 +416,18 @@ public final class LibraryCheck {
     }
 
     private static int failures;
+
+    private static String formatted(String type, String body) {
+        String message = "HTTP/1.1 200 OK\r\nContent-Type: " + type + "\r\n\r\n" + body;
+        DisplayText display = DisplayText.build(HttpText.parse(message, false), new Settings(), Set.of());
+        StringBuilder text = new StringBuilder();
+        for (int i = display.bodyStart(); i < display.length(); i++) {
+            int origin = display.origin(i);
+            if (origin >= 0 && display.charAt(i) != message.charAt(origin)) return "origin mismatch at " + i;
+            text.append(display.charAt(i));
+        }
+        return text.toString();
+    }
 
     private static void check(String name, boolean ok) {
         if (!ok) failures++;

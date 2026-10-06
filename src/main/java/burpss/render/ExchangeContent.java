@@ -55,7 +55,7 @@ public final class ExchangeContent implements Content {
             this.source = source;
             EditState state = exchange.state;
             display = DisplayText.build(source, settings, state.toggledHeaders.get(index));
-            layout = PaneLayout.build(display, settings.wrapColumns, settings.maxBodyLines);
+            layout = PaneLayout.build(display, settings.wrapColumns, settings.maxBodyLines, state.bodyOffset[index]);
             autoRedactions = settings.autoRedact ? AutoRedactor.find(source, settings) : List.of();
             computeHidden();
         }
@@ -86,21 +86,41 @@ public final class ExchangeContent implements Content {
 
         void computeHidden() {
             hidden = new boolean[display.length()];
-            for (TextRange r : autoRedactions) {
-                if (!exchange.state.suppressedAuto.get(index).contains(r.key())) hide(r, settings.revealChars);
+            int[] firstAt = new int[source.text().length()];
+            java.util.Arrays.fill(firstAt, -1);
+            for (int i = display.length() - 1; i >= 0; i--) {
+                if (display.origin(i) >= 0) firstAt[display.origin(i)] = i;
             }
-            for (TextRange r : exchange.state.manualRedactions.get(index)) hide(r, 0);
+            for (TextRange r : autoRedactions) {
+                if (!exchange.state.suppressedAuto.get(index).contains(r.key())) hide(r, settings.revealChars, firstAt);
+            }
+            for (TextRange r : exchange.state.manualRedactions.get(index)) hide(r, 0, firstAt);
         }
 
-        void hide(TextRange range, int revealChars) {
+        void hide(TextRange range, int revealChars, int[] firstAt) {
             List<Integer> covered = new ArrayList<>();
-            for (int i = 0; i < display.length(); i++) {
-                int o = display.origin(i);
-                if (o >= 0 && range.contains(o)) covered.add(i);
+            for (int o = Math.max(0, range.start()); o < Math.min(range.end(), firstAt.length); o++) {
+                for (int i = firstAt[o]; i >= 0 && i < display.length() && display.origin(i) == o; i++) covered.add(i);
             }
             int reveal = revealChars > 0 && covered.size() >= revealChars * 3 ? revealChars : 0;
             for (int k = 0; k < covered.size() - reveal; k++) hidden[covered.get(k)] = true;
         }
+    }
+
+    public static int focusOffset(Exchange exchange, Settings settings, int pane, int origin) {
+        HttpText message = exchange.pane(pane);
+        if (message == null || origin < message.bodyStart()) return 0;
+        DisplayText display = DisplayText.build(message, settings, exchange.state.toggledHeaders.get(pane));
+        int at = display.length();
+        for (int i = display.bodyStart(); i < display.length(); i++) {
+            if (display.origin(i) >= origin) {
+                at = i;
+                break;
+            }
+        }
+        int row = PaneLayout.bodyRow(display, settings.wrapColumns, at);
+        int limit = PaneLayout.limit(settings.maxBodyLines);
+        return row < limit ? 0 : row - limit / 2;
     }
 
     public ExchangeContent(Exchange exchange, Settings settings, Theme theme) {

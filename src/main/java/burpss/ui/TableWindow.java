@@ -12,6 +12,7 @@ import burpss.render.Theme;
 
 import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
+import java.awt.Window;
 import java.awt.geom.Point2D;
 import java.util.List;
 
@@ -23,8 +24,8 @@ public final class TableWindow extends EditorWindow {
     private final History history = new History(state);
     private TableContent content;
 
-    public TableWindow(List<ResultRow> rows, String method, String url, String host, Settings settings, Settings.Store store) {
-        super("Snapshot – results table", settings, store, true);
+    public TableWindow(Window owner, List<ResultRow> rows, String method, String url, String host, Settings settings, Settings.Store store) {
+        super(owner, "Snapshot – results table", settings, store, true);
         this.rows = rows;
         this.method = method;
         this.url = url;

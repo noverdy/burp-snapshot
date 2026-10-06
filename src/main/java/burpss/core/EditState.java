@@ -18,6 +18,7 @@ public final class EditState {
     public String title = "";
     public String caption = "";
     public String aiContext = "";
+    public final int[] bodyOffset = new int[2];
 
     public EditState copy() {
         EditState s = new EditState();
@@ -34,6 +35,8 @@ public final class EditState {
         s.title = title;
         s.caption = caption;
         s.aiContext = aiContext;
+        s.bodyOffset[0] = bodyOffset[0];
+        s.bodyOffset[1] = bodyOffset[1];
         return s;
     }
 
@@ -56,5 +59,7 @@ public final class EditState {
         title = o.title;
         caption = o.caption;
         aiContext = o.aiContext;
+        bodyOffset[0] = o.bodyOffset[0];
+        bodyOffset[1] = o.bodyOffset[1];
     }
 }

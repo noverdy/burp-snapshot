@@ -7,7 +7,6 @@ import burp.api.montoya.ai.chat.PromptOptions;
 import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.core.Registration;
 import burp.api.montoya.http.handler.TimingData;
-import burp.api.montoya.http.message.HttpMessage;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
@@ -26,6 +25,7 @@ import burpss.core.HttpText;
 import burpss.core.Mark;
 import burpss.core.Settings;
 import burpss.core.Shortcuts;
+import burpss.render.ExchangeContent;
 import burpss.render.Fonts;
 import burpss.ui.EditorWindow;
 import burpss.ui.ExchangeWindow;
@@ -38,6 +38,7 @@ import burpss.ui.Toast;
 import javax.swing.JMenuItem;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
+import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -47,7 +48,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 public final class SnapshotExtension implements BurpExtension {
 
@@ -57,6 +61,12 @@ public final class SnapshotExtension implements BurpExtension {
     private Shortcuts shortcuts;
     private SnapshotsTab tab;
     private final List<Registration> hotkeys = new ArrayList<>();
+    private final ExecutorService renderer = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "Snapshot quick copy");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private volatile boolean unloaded;
     private final AiMarkup.Model ai = new AiMarkup.Model() {
         public boolean available() {
             try {
@@ -81,6 +91,7 @@ public final class SnapshotExtension implements BurpExtension {
     public void initialize(MontoyaApi api) {
         this.api = api;
         api.extension().setName("Snapshot");
+        api.extension().registerUnloadingHandler(this::unload);
         Fonts.use(api.userInterface().currentEditorFont(), api.userInterface().currentDisplayFont());
         api.http().registerHttpHandler(timer);
         library = new SnapshotLibrary(api.persistence().extensionData(), this::settings);
@@ -99,6 +110,26 @@ public final class SnapshotExtension implements BurpExtension {
         });
     }
 
+    private void unload() {
+        unloaded = true;
+        renderer.shutdownNow();
+        Runnable close = () -> {
+            for (Window window : Window.getWindows()) {
+                if (window.getClass().getClassLoader() == SnapshotExtension.class.getClassLoader()) window.dispose();
+            }
+        };
+        if (SwingUtilities.isEventDispatchThread()) close.run();
+        else {
+            try {
+                SwingUtilities.invokeAndWait(close);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                api.logging().logToError("Could not close Snapshot windows: " + e.getCause());
+            }
+        }
+    }
+
     private List<Component> menuItems(ContextMenuEvent event) {
         List<Component> items = new ArrayList<>();
         List<HttpRequestResponse> selected = event.selectedRequestResponses();
@@ -106,7 +137,7 @@ public final class SnapshotExtension implements BurpExtension {
             items.add(item("Snapshot request/response…", () -> openExchanges(event)));
         }
         if (selected.size() >= 2) {
-            items.add(item("Snapshot as results table…", () -> openTable(selected)));
+            items.add(item("Snapshot as results table…", () -> openTable(selected, event.inputEvent())));
         }
         return items;
     }
@@ -150,7 +181,7 @@ public final class SnapshotExtension implements BurpExtension {
 
     private void openFromHotkey(HotKeyEvent event) {
         List<HttpRequestResponse> selected = event.selectedRequestResponses();
-        if (event.messageEditorRequestResponse().isEmpty() && selected.size() >= 2) openTable(selected);
+        if (event.messageEditorRequestResponse().isEmpty() && selected.size() >= 2) openTable(selected, event.inputEvent());
         else if (event.messageEditorRequestResponse().isPresent() || !selected.isEmpty())
             openExchanges(event.messageEditorRequestResponse(), selected, event.inputEvent());
     }
@@ -160,10 +191,10 @@ public final class SnapshotExtension implements BurpExtension {
         List<HttpRequestResponse> selected = event.selectedRequestResponses();
         Settings settings = settings();
         String id = SnapshotLibrary.newId();
-        BufferedImage image;
+        Supplier<BufferedImage> render;
         String detail;
         if (editor.isEmpty() && selected.size() >= 2) {
-            List<Long> times = selected.stream().map(rr -> timeMs(rr, List.of(), null)).toList();
+            List<Long> times = times(selected, event.inputEvent());
             HttpRequest first = selected.get(0).request();
             String host = first.httpService().host();
             EditState state = new EditState();
@@ -171,27 +202,43 @@ public final class SnapshotExtension implements BurpExtension {
             SnapshotLibrary.Table table = new SnapshotLibrary.Table(SnapshotLibrary.rows(selected, times),
                     first.method(), first.url(), host, state, settings);
             library.saveTable(id, selected, times, first.method(), first.url(), host, new EditorWindow.Update(0, state, settings, false));
-            image = SnapshotLibrary.render(table, settings, settings.exportScale);
+            render = () -> SnapshotLibrary.render(table, settings, settings.exportScale);
             detail = selected.size() + " results · " + first.method() + " " + first.pathWithoutQuery();
         } else {
             HttpRequestResponse rr = editor.map(MessageEditorHttpRequestResponse::requestResponse)
                     .orElse(selected.isEmpty() ? null : selected.get(0));
             if (rr == null) return;
             Exchange exchange = editor.isPresent()
-                    ? withSelection(toExchange(rr, selected, event.inputEvent()), editor.get()) : toExchange(rr, List.of(), null);
+                    ? withSelection(toExchange(rr, selected, event.inputEvent(), 0), editor.get(), settings) : toExchange(rr, List.of(), event.inputEvent(), 0);
             HttpRequest request = rr.request();
             exchange.state.title = shortcuts.title(request.method(), request.pathWithoutQuery(), request.httpService().host(), exchange.status);
             library.saveExchange(id, rr, exchange, new EditorWindow.Update(0, exchange.state.copy(), settings, false));
-            image = SnapshotLibrary.render(exchange, settings, settings.exportScale);
+            render = () -> SnapshotLibrary.render(exchange, settings, settings.exportScale);
             detail = request.method() + " " + request.pathWithoutQuery();
         }
-        java.awt.Frame owner = api.userInterface().swingUtils().suiteFrame();
-        try {
-            ImageExport.copy(image);
-            toast(new Toast(owner, image, "Snapshot copied", detail, () -> reopen(id)));
-        } catch (IOException | IllegalStateException e) {
-            toast(new Toast(owner, null, "Copy failed", e.getMessage(), null));
-        }
+        renderer.execute(() -> {
+            BufferedImage image;
+            try {
+                image = render.get();
+            } catch (RuntimeException | OutOfMemoryError e) {
+                SwingUtilities.invokeLater(() -> toast(null, "Copy failed", "Could not render: " + e.getMessage(), null));
+                return;
+            }
+            SwingUtilities.invokeLater(() -> {
+                if (unloaded) return;
+                try {
+                    ImageExport.copy(image);
+                    toast(image, "Snapshot copied", detail, () -> reopen(id));
+                } catch (IOException | IllegalStateException e) {
+                    toast(null, "Copy failed", e.getMessage(), null);
+                }
+            });
+        });
+    }
+
+    private void toast(BufferedImage image, String message, String detail, Runnable onOpen) {
+        if (unloaded) return;
+        toast(new Toast(api.userInterface().swingUtils().suiteFrame(), image, message, detail, onOpen));
     }
 
     private void toast(Toast toast) {
@@ -205,26 +252,27 @@ public final class SnapshotExtension implements BurpExtension {
 
     private void openExchanges(Optional<MessageEditorHttpRequestResponse> editorItem, List<HttpRequestResponse> selected,
                                InputEvent source) {
+        Settings settings = settings();
         List<HttpRequestResponse> items = new ArrayList<>();
         List<Exchange> exchanges = new ArrayList<>();
         editorItem.ifPresentOrElse(editor -> {
             items.add(editor.requestResponse());
-            exchanges.add(withSelection(toExchange(editor.requestResponse(), selected, source), editor));
+            exchanges.add(withSelection(toExchange(editor.requestResponse(), selected, source, 0), editor, settings));
         }, () -> selected.forEach(rr -> {
             items.add(rr);
-            exchanges.add(toExchange(rr, List.of(), null));
+            exchanges.add(toExchange(rr, List.of(), source, items.size() - 1));
         }));
         List<String> ids = items.stream().map(rr -> SnapshotLibrary.newId()).toList();
-        ExchangeWindow window = new ExchangeWindow(exchanges, settings(), store());
+        ExchangeWindow window = new ExchangeWindow(suiteFrame(), exchanges, settings, store());
         window.onUpdate(u -> library.saveExchange(ids.get(u.item()), items.get(u.item()), exchanges.get(u.item()), u));
         show(window);
     }
 
-    private void openTable(List<HttpRequestResponse> selected) {
-        List<Long> times = selected.stream().map(rr -> timeMs(rr, List.of(), null)).toList();
+    private void openTable(List<HttpRequestResponse> selected, InputEvent source) {
+        List<Long> times = times(selected, source);
         HttpRequest first = selected.get(0).request();
         String id = SnapshotLibrary.newId();
-        TableWindow window = new TableWindow(SnapshotLibrary.rows(selected, times), first.method(), first.url(),
+        TableWindow window = new TableWindow(suiteFrame(), SnapshotLibrary.rows(selected, times), first.method(), first.url(),
                 first.httpService().host(), settings(), store());
         window.onUpdate(u -> library.saveTable(id, selected, times, first.method(), first.url(), first.httpService().host(), u));
         show(window);
@@ -235,7 +283,7 @@ public final class SnapshotExtension implements BurpExtension {
             SnapshotLibrary.Table t = library.table(id);
             List<HttpRequestResponse> items = library.items(id);
             List<Long> times = library.times(id);
-            TableWindow window = new TableWindow(t.rows(), t.method(), t.url(), t.host(), t.settings(), store());
+            TableWindow window = new TableWindow(suiteFrame(), t.rows(), t.method(), t.url(), t.host(), t.settings(), store());
             window.restore(t.state());
             window.onUpdate(u -> library.saveTable(id, items, times, t.method(), t.url(), t.host(), u));
             show(window);
@@ -243,18 +291,23 @@ public final class SnapshotExtension implements BurpExtension {
         }
         Exchange exchange = library.exchange(id);
         HttpRequestResponse item = library.item(id);
-        ExchangeWindow window = new ExchangeWindow(List.of(exchange), library.settings(id), store());
+        ExchangeWindow window = new ExchangeWindow(suiteFrame(), List.of(exchange), library.settings(id), store());
         window.onUpdate(u -> library.saveExchange(id, item, exchange, u));
         show(window);
     }
 
     private void show(EditorWindow window) {
         window.useAi(ai);
+        window.useTemplates(library);
         api.userInterface().applyThemeToComponent(window);
-        window.open(api.userInterface().swingUtils().suiteFrame());
+        window.open(suiteFrame());
     }
 
-    private Exchange toExchange(HttpRequestResponse rr, List<HttpRequestResponse> alternatives, InputEvent source) {
+    private Window suiteFrame() {
+        return api.userInterface().swingUtils().suiteFrame();
+    }
+
+    private Exchange toExchange(HttpRequestResponse rr, List<HttpRequestResponse> alternatives, InputEvent source, int index) {
         HttpRequest request = rr.request();
         HttpResponse response = rr.response();
         return new Exchange(
@@ -263,46 +316,40 @@ public final class SnapshotExtension implements BurpExtension {
                 request.method(), request.url(), request.httpService().host(),
                 response == null ? 0 : response.statusCode(),
                 response == null ? "" : response.reasonPhrase(),
-                timeMs(rr, alternatives, source));
+                timeMs(rr, alternatives, source, index));
     }
 
-    private static Exchange withSelection(Exchange exchange, MessageEditorHttpRequestResponse editor) {
+    private static Exchange withSelection(Exchange exchange, MessageEditorHttpRequestResponse editor, Settings settings) {
         editor.selectionOffsets().filter(r -> r.endIndexExclusive() > r.startIndexInclusive()).ifPresent(range -> {
             boolean isRequest = editor.selectionContext() == MessageEditorHttpRequestResponse.SelectionContext.REQUEST;
             HttpRequestResponse rr = editor.requestResponse();
             byte[] bytes = isRequest ? rr.request().toByteArray().getBytes() : rr.response().toByteArray().getBytes();
-            DecodedText text = DecodedText.decode(bytes);
-            exchange.state.marks.add(new Mark(new Anchor.Text(isRequest ? 0 : 1,
-                    text.charOffset(range.startIndexInclusive()), text.charOffset(range.endIndexExclusive())), 0));
+            int kept = SnapshotLibrary.keptLength(bytes);
+            if (range.startIndexInclusive() >= kept) return;
+            DecodedText text = DecodedText.decode(kept == bytes.length ? bytes : Arrays.copyOf(bytes, kept));
+            int pane = isRequest ? 0 : 1;
+            int start = text.charOffset(range.startIndexInclusive());
+            exchange.state.marks.add(new Mark(new Anchor.Text(pane, start, text.charOffset(range.endIndexExclusive())), 0));
+            exchange.state.bodyOffset[pane] = ExchangeContent.focusOffset(exchange, settings, pane, start);
         });
         return exchange;
     }
 
-    private long timeMs(HttpRequestResponse rr, List<HttpRequestResponse> alternatives, InputEvent source) {
+    private List<Long> times(List<HttpRequestResponse> selected, InputEvent source) {
+        List<Long> times = new ArrayList<>();
+        for (int i = 0; i < selected.size(); i++) times.add(timeMs(selected.get(i), List.of(), source, i));
+        return times;
+    }
+
+    private long timeMs(HttpRequestResponse rr, List<HttpRequestResponse> alternatives, InputEvent source, int index) {
         List<HttpRequestResponse> candidates = new ArrayList<>(List.of(rr));
         candidates.addAll(alternatives);
         for (HttpRequestResponse candidate : candidates) {
             long ms = candidate.timingData().map(SnapshotExtension::millis).orElse(-1L);
             if (ms >= 0) return ms;
         }
-        long shown = rr.response() == null ? -1 : StatusBarTime.millis(source, rr.response().toByteArray().length());
-        if (shown >= 0) return shown;
-        long proxied = proxyHistoryTime(rr);
-        return proxied >= 0 ? proxied : timer.elapsedMs(rr.response());
-    }
-
-    private long proxyHistoryTime(HttpRequestResponse rr) {
-        if (rr.response() == null) return -1;
-        byte[] request = rr.request().toByteArray().getBytes();
-        byte[] response = rr.response().toByteArray().getBytes();
-        return api.proxy().history(h -> h.hasResponse()
-                        && (same(h.response(), response) || same(h.originalResponse(), response))
-                        && (same(h.finalRequest(), request) || same(h.request(), request)))
-                .stream().map(h -> millis(h.timingData())).filter(ms -> ms >= 0).findFirst().orElse(-1L);
-    }
-
-    private static boolean same(HttpMessage message, byte[] bytes) {
-        return message != null && message.toByteArray().length() == bytes.length && Arrays.equals(message.toByteArray().getBytes(), bytes);
+        long shown = rr.response() == null ? -1 : ShownTime.millis(source, rr.response().toByteArray().length(), index);
+        return shown >= 0 ? shown : timer.elapsedMs(rr.response());
     }
 
     private static long millis(TimingData timing) {

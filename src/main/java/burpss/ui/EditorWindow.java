@@ -6,6 +6,8 @@ import burpss.core.EditState;
 import burpss.core.History;
 import burpss.core.Mark;
 import burpss.core.Settings;
+import burpss.core.Template;
+import burpss.core.Templates;
 import burpss.render.Content;
 import burpss.render.HeaderInfo;
 import burpss.render.Scene;
@@ -18,7 +20,7 @@ import javax.swing.ButtonGroup;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
-import javax.swing.JFrame;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
@@ -40,9 +42,8 @@ import java.awt.GraphicsEnvironment;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
 import java.util.function.Consumer;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
@@ -51,8 +52,10 @@ import java.awt.event.KeyEvent;
 import java.awt.geom.Point2D;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
-public abstract class EditorWindow extends JFrame implements Canvas.Handler {
+public abstract class EditorWindow extends JDialog implements Canvas.Handler {
 
     enum Tool { MARK, REDACT }
 
@@ -69,6 +72,8 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     private final JTextField titleField = new JTextField(20);
     private final javax.swing.JTextArea captionField = new javax.swing.JTextArea(3, 20);
     private AiMarkup.Model ai;
+    private AiDialog aiDialog;
+    private TemplateStore templates;
     private final JComboBox<String> zoom = new JComboBox<>(new String[]{"Fit", "50%", "75%", "100%", "150%", "200%"});
     private JScrollPane canvasScroll;
     protected final JToolBar toolbar = new JToolBar();
@@ -77,24 +82,20 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     private String logoPath;
     private Image logo;
     private boolean syncingTitle;
+    private static final int RECENT_TEMPLATES = 8;
     private final Timer autosave = new Timer(800, e -> flush());
+    private final List<Timer> debounces = new ArrayList<>();
     private Consumer<Update> onUpdate = update -> { };
     private boolean dirty;
     private boolean syncingZoom;
 
-    EditorWindow(String title, Settings settings, Settings.Store store, boolean table) {
-        super(title);
+    EditorWindow(Window owner, String title, Settings settings, Settings.Store store, boolean table) {
+        super(owner, title, ModalityType.MODELESS);
         this.settings = settings;
         this.store = store;
         this.table = table;
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         autosave.setRepeats(false);
-        addWindowListener(new WindowAdapter() {
-            @Override
-            public void windowClosed(WindowEvent e) {
-                flush();
-            }
-        });
         buildToolbar(!table);
         watch(titleField, () -> state().title = titleField.getText().strip());
         watch(captionField, () -> state().caption = captionField.getText().strip());
@@ -136,6 +137,14 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
 
     abstract AiMarkup.Result aiResult(String reply);
 
+    Template captureTemplate() {
+        return null;
+    }
+
+    Templates.Applied applyTemplate(Template template) {
+        return new Templates.Applied(0, List.of());
+    }
+
     void redactClick(Point2D contentPoint) {
     }
 
@@ -152,6 +161,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         toolbar.add(javax.swing.Box.createHorizontalGlue());
         toolbar.add(aiButton);
         syncTitleField();
+        settingsPanel.syncOffsets();
         setLocationRelativeTo(parent);
         setVisible(true);
         rebuild();
@@ -178,12 +188,24 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         ai = model;
     }
 
+    public void useTemplates(TemplateStore store) {
+        templates = store;
+    }
+
     public void onUpdate(Consumer<Update> listener) {
         onUpdate = listener;
     }
 
     int item() {
         return 0;
+    }
+
+    @Override
+    public void dispose() {
+        debounces.forEach(Timer::stop);
+        flush();
+        autosave.stop();
+        super.dispose();
     }
 
     void flush() {
@@ -209,7 +231,10 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     }
 
     private JComponent sidebar() {
-        settingsPanel = new SettingsPanel(settings, table, this::settingsChanged, () -> settings.save(store));
+        settingsPanel = new SettingsPanel(settings, table, this::settingsChanged, () -> settings.save(store), new SettingsPanel.Offsets() {
+            public int get(int pane) { return state().bodyOffset[pane]; }
+            public void set(int pane, int lines) { edit(() -> state().bodyOffset[pane] = lines); }
+        });
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, UIManager.getColor("Separator.foreground")));
         panel.add(settingsPanel.scrollable(textSection()), BorderLayout.CENTER);
@@ -221,6 +246,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         getContentPane().remove(sidebar);
         sidebar = sidebar();
         getContentPane().add(sidebar, BorderLayout.EAST);
+        settingsPanel.syncOffsets();
         getContentPane().revalidate();
     }
 
@@ -273,6 +299,13 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         toolbar.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, UIManager.getColor("Separator.foreground")),
                 BorderFactory.createEmptyBorder(2, 4, 2, 6)));
+        if (redaction) {
+            JButton menu = new JButton("▤ Templates ▾");
+            menu.setToolTipText("Apply a saved markup template, or save this one");
+            menu.addActionListener(e -> templateMenu().show(menu, 0, menu.getHeight()));
+            toolbar.add(menu);
+            toolbar.addSeparator();
+        }
         ButtonGroup tools = new ButtonGroup();
         toolButton(tools, "▢ Mark", "Click a param to box it, or drag over any text (M)", Tool.MARK).setSelected(true);
         if (redaction) toolButton(tools, "▒ Redact", "Click a value to redact/unredact it, or drag over any text (R)", Tool.REDACT);
@@ -356,6 +389,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     private void watch(javax.swing.text.JTextComponent field, Runnable apply) {
         Timer debounce = new Timer(300, e -> edit(apply));
         debounce.setRepeats(false);
+        debounces.add(debounce);
         field.getDocument().addDocumentListener(new DocumentListener() {
             public void insertUpdate(DocumentEvent e) { if (!syncingTitle) debounce.restart(); }
             public void removeUpdate(DocumentEvent e) { if (!syncingTitle) debounce.restart(); }
@@ -381,8 +415,13 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
                     "AI markup", javax.swing.JOptionPane.INFORMATION_MESSAGE);
             return;
         }
+        if (aiDialog != null && aiDialog.isDisplayable()) {
+            aiDialog.toFront();
+            return;
+        }
         String initial = state().aiContext.isBlank() ? state().title : state().aiContext;
-        new AiDialog(this, initial, !state().marks.isEmpty(), ai, aiSystem(), this::aiPrompt, this::applyAi).setVisible(true);
+        aiDialog = new AiDialog(this, initial, !state().marks.isEmpty(), ai, aiSystem(), this::aiPrompt, this::applyAi);
+        aiDialog.setVisible(true);
     }
 
     private String applyAi(String reply, String context, boolean replace) {
@@ -406,6 +445,61 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         flash(result.marks().size() + " mark" + (result.marks().size() == 1 ? "" : "s") + " added"
                 + (result.unmatched() > 0 ? ", " + result.unmatched() + " skipped" : ""), Notice.Kind.SUCCESS);
         return null;
+    }
+
+    private JPopupMenu templateMenu() {
+        JPopupMenu menu = new JPopupMenu();
+        List<Template> recent = templates == null ? List.of() : templates.recent();
+        if (recent.isEmpty()) {
+            JMenuItem none = new JMenuItem("No templates yet");
+            none.setEnabled(false);
+            menu.add(none);
+        }
+        for (Template t : recent.subList(0, Math.min(RECENT_TEMPLATES, recent.size()))) {
+            JMenuItem item = item(t.name, () -> useTemplate(t));
+            item.putClientProperty("html.disable", Boolean.TRUE);
+            item.setToolTipText(t.summary());
+            menu.add(item);
+        }
+        if (!recent.isEmpty()) {
+            menu.addSeparator();
+            menu.add(item("All templates… (" + recent.size() + ")", () -> TemplatesDialog.show(this, templates, this::useTemplate)));
+        }
+        JMenuItem save = item("Save current as template…", this::saveTemplate);
+        save.setEnabled(templates != null);
+        menu.add(save);
+        return menu;
+    }
+
+    private void saveTemplate() {
+        Template captured = captureTemplate();
+        if (captured == null) return;
+        captured.settings = settings.encode();
+        Template saved = SaveTemplateDialog.show(this, captured, state().title, templates, store);
+        if (saved == null) return;
+        templates.saveTemplate(saved);
+        flash("Saved template “" + saved.name + "”", Notice.Kind.SUCCESS);
+    }
+
+    private void useTemplate(Template template) {
+        if (template.settings != null) {
+            Settings applied = Settings.decode(template.settings, settings);
+            applied.zoom = settings.zoom;
+            applied.openSections = settings.openSections;
+            applied.lastSaveDir = settings.lastSaveDir;
+            settings.copyFrom(applied);
+            settings.save(store);
+            reloadSettings();
+        }
+        Templates.Applied[] result = new Templates.Applied[1];
+        edit(() -> result[0] = applyTemplate(template));
+        syncTitleField();
+        settingsPanel.syncOffsets();
+        template.lastUsed = System.currentTimeMillis();
+        templates.saveTemplate(template);
+        List<String> missing = result[0].missing();
+        if (missing.isEmpty()) flash("Applied “" + template.name + "”", Notice.Kind.SUCCESS);
+        else flash("Applied “" + template.name + "”, not found: " + String.join(", ", missing), Notice.Kind.INFO);
     }
 
     private static JButton button(String label, Runnable action) {
@@ -448,6 +542,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
 
     private void afterHistory() {
         syncTitleField();
+        settingsPanel.syncOffsets();
         rebuild();
         changed();
     }

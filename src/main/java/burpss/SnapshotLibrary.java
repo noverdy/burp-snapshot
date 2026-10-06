@@ -12,6 +12,7 @@ import burpss.core.PayloadDiff;
 import burpss.core.ResultRow;
 import burpss.core.Settings;
 import burpss.core.StateCodec;
+import burpss.core.Template;
 import burpss.render.Content;
 import burpss.render.ExchangeContent;
 import burpss.render.HeaderInfo;
@@ -20,6 +21,7 @@ import burpss.render.TableContent;
 import burpss.render.Theme;
 import burpss.ui.EditorWindow;
 import burpss.ui.SnapshotsTab;
+import burpss.ui.TemplateStore;
 
 import javax.imageio.ImageIO;
 import java.awt.Image;
@@ -27,6 +29,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
@@ -34,10 +37,11 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-final class SnapshotLibrary implements SnapshotsTab.Source {
+final class SnapshotLibrary implements SnapshotsTab.Source, TemplateStore {
 
     static final int MAX_DRAFTS = 20;
-    private static final String EXCHANGE = "exchange", TABLE = "table", PREFIX = "snapshot.";
+    static final int MAX_MESSAGE_BYTES = 1 << 20;
+    private static final String EXCHANGE = "exchange", TABLE = "table", PREFIX = "snapshot.", TEMPLATE = "template.";
 
     record Table(List<ResultRow> rows, String method, String url, String host, EditState state, Settings settings) {
     }
@@ -62,6 +66,33 @@ final class SnapshotLibrary implements SnapshotsTab.Source {
 
     void onChange(Runnable listener) {
         this.onChange = listener;
+    }
+
+    @Override
+    public List<Template> templates() {
+        List<Template> out = new ArrayList<>();
+        for (String key : project.childObjectKeys()) {
+            if (!key.startsWith(TEMPLATE)) continue;
+            String data = project.getChildObject(key).getString("data");
+            if (data == null) continue;
+            try {
+                out.add(Template.decode(data));
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return out;
+    }
+
+    @Override
+    public void saveTemplate(Template template) {
+        PersistedObject entry = PersistedObject.persistedObject();
+        entry.setString("data", template.encode());
+        project.setChildObject(TEMPLATE + template.id, entry);
+    }
+
+    @Override
+    public void deleteTemplate(String id) {
+        project.deleteChildObject(TEMPLATE + id);
     }
 
     static String newId() {
@@ -176,7 +207,17 @@ final class SnapshotLibrary implements SnapshotsTab.Source {
     }
 
     static String decode(byte[] bytes) {
-        return DecodedText.decode(bytes).text();
+        int kept = keptLength(bytes);
+        if (kept == bytes.length) return DecodedText.decode(bytes).text();
+        return DecodedText.decode(Arrays.copyOf(bytes, kept)).text()
+                + String.format("\n… %,d more bytes not shown", bytes.length - kept);
+    }
+
+    static int keptLength(byte[] bytes) {
+        if (bytes.length <= MAX_MESSAGE_BYTES) return bytes.length;
+        int cut = MAX_MESSAGE_BYTES;
+        while (cut > 0 && (bytes[cut] & 0xC0) == 0x80) cut--;
+        return cut;
     }
 
     private static EditState state(PersistedObject entry) {

@@ -13,9 +13,12 @@ A Burp Suite extension that turns a request and response into a clean PNG for yo
 
 - Click a parameter, header, cookie or JSON key to box it and add a note.
 - Automatic redaction of auth headers, cookies and tokens, keeping the last 4 characters.
+- JSON, HTML, XML, CSS and JavaScript bodies are pretty-printed and colored like Burp's own editor.
+- Long bodies are trimmed to the part that matters, and a highlighted selection is centered for you.
+- Templates reuse your marks, redactions, title, caption and settings on the next request.
 - AI markup (Burp Pro): describe the finding and Burp AI boxes the evidence, writes the notes, title and caption.
-- Intruder results as a table.
-- Burp's own light and dark colors, side by side or stacked, with a tiled watermark.
+- Intruder results as a table, with response times.
+- Light and dark themes, side by side or stacked, with a tiled watermark.
 - Copy or save as PNG, or press `⌘⇧C` to copy without opening a window.
 - Drafts and exported snapshots saved in your Burp project.
 
@@ -48,6 +51,12 @@ Right-click any request (Proxy, Repeater, Logger, Intruder…) and choose **Exte
 
 Use `Ctrl` instead of `⌘` on Windows and Linux. Change the two global hotkeys from the gear in the **Snapshot** tab.
 
+**Long bodies** show up to **Max body lines** (100 at most). **Request offset** and **Response offset** in the **Content** settings skip lines from the top, so you can show any part of the body. Highlight text in Burp's message editor before opening Snapshot and it's marked, with the offset set so the highlight sits in the middle.
+
+**Templates** are saved per Burp project from **Templates → Save current as template…** in the editor. Pick which parts to keep: marks, redactions, title, caption, header visibility and the snapshot settings (including body offsets). Applying one finds each mark and redaction again by header, parameter, JSON key or text, and fills `{method}`, `{path}`, `{host}` and `{status}` in the title and caption. Anything it can't find is skipped and listed. The menu lists your 8 most recent templates, and **All templates…** searches, renames and deletes the rest.
+
+**Response time** comes from Burp's timing data, Repeater's status bar, or the Proxy history row you selected.
+
 **AI markup** needs Burp Pro with **Use AI** enabled for Snapshot in **Extensions → Installed**. Burp AI only sees what the image shows, with redacted values replaced.
 
 **Drafts and exported** live in the **Snapshot** tab. Drafts keep your last 20 unexported snapshots, and anything you copied or saved stays under Exported. Burp Community projects are temporary, so they don't survive a restart.
@@ -60,3 +69,7 @@ Use `Ctrl` instead of `⌘` on Windows and Linux. Change the two global hotkeys 
 ```
 
 Pushing a `v*` tag builds the jar and publishes a release.
+
+## License
+
+[MIT](LICENSE)

@@ -16,5 +16,10 @@ public enum Style {
     NUMBER,
     KEYWORD,
     TAG,
-    ATTR
+    ATTR,
+    ATTR_VALUE,
+    CODE_KEYWORD,
+    CODE_STRING,
+    CODE_NUMBER,
+    CODE_COMMENT
 }

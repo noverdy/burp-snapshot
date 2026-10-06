@@ -2,6 +2,7 @@ package burpss.ui;
 
 import burpss.core.Mark;
 import burpss.core.Settings;
+import burpss.render.PaneLayout;
 
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
@@ -41,6 +42,8 @@ import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
@@ -57,7 +60,18 @@ final class SettingsPanel extends JPanel {
     private JCheckBox timeBox;
     private final JLabel timeHint = new JLabel();
 
-    SettingsPanel(Settings settings, boolean table, Runnable onChange, Runnable onPreference) {
+    interface Offsets {
+        int get(int pane);
+
+        void set(int pane, int lines);
+    }
+
+    private final List<JSpinner> offsetSpinners = new ArrayList<>();
+    private final Offsets offsets;
+    private boolean syncingOffsets;
+
+    SettingsPanel(Settings settings, boolean table, Runnable onChange, Runnable onPreference, Offsets offsets) {
+        this.offsets = offsets;
         this.onPreference = onPreference;
         this.s = settings;
         this.onChange = onChange;
@@ -85,9 +99,11 @@ final class SettingsPanel extends JPanel {
 
         if (!table) {
             section("Content", false, true);
-            check("Pretty-print JSON", () -> s.prettyJson, v -> s.prettyJson = v);
+            check("Pretty-print body", () -> s.prettyJson, v -> s.prettyJson = v);
             check("Line numbers", () -> s.lineNumbers, v -> s.lineNumbers = v);
-            number("Max body lines", 0, 10_000, () -> s.maxBodyLines, v -> s.maxBodyLines = v);
+            number("Max body lines", 1, PaneLayout.MAX_BODY_LINES, () -> s.maxBodyLines, v -> s.maxBodyLines = v);
+            offset("Request offset", 0);
+            offset("Response offset", 1);
             number("Wrap at", 20, 400, () -> s.wrapColumns, v -> s.wrapColumns = v);
             text("Hidden headers", true, () -> s.hideHeaders, v -> s.hideHeaders = v);
 
@@ -306,6 +322,22 @@ final class SettingsPanel extends JPanel {
             onChange.run();
         });
         row(label, spinner);
+    }
+
+    private void offset(String label, int pane) {
+        JSpinner spinner = new JSpinner(new SpinnerNumberModel(0, 0, 1_000_000, 1));
+        spinner.setToolTipText("Body lines to skip before the shown part");
+        spinner.addChangeListener(e -> {
+            if (!syncingOffsets) offsets.set(pane, (Integer) spinner.getValue());
+        });
+        offsetSpinners.add(spinner);
+        row(label, spinner);
+    }
+
+    void syncOffsets() {
+        syncingOffsets = true;
+        for (int pane = 0; pane < offsetSpinners.size(); pane++) offsetSpinners.get(pane).setValue(offsets.get(pane));
+        syncingOffsets = false;
     }
 
     private void slider(String label, int min, int max, String unit, Supplier<Integer> get, IntConsumer set) {

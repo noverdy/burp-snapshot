@@ -223,7 +223,9 @@ public final class SnapshotsTab extends JPanel {
         return (list, entry, index, selected, focus) -> {
             JLabel title = new JLabel(entry.title().isBlank() ? entry.detail() : entry.title());
             title.setFont(title.getFont().deriveFont(Font.BOLD));
+            title.putClientProperty("html.disable", Boolean.TRUE);
             JLabel detail = new JLabel((entry.title().isBlank() ? "" : entry.detail() + "  ·  ") + ago(entry.updated()));
+            detail.putClientProperty("html.disable", Boolean.TRUE);
             detail.setForeground(selected ? list.getSelectionForeground() : UIManager.getColor("Label.disabledForeground"));
             title.setForeground(selected ? list.getSelectionForeground() : list.getForeground());
             JPanel cell = new JPanel(new GridLayout(2, 1));
@@ -235,7 +237,7 @@ public final class SnapshotsTab extends JPanel {
         };
     }
 
-    private static String ago(long millis) {
+    static String ago(long millis) {
         Duration d = Duration.between(Instant.ofEpochMilli(millis), Instant.now());
         if (d.toMinutes() < 1) return "just now";
         if (d.toHours() < 1) return d.toMinutes() + " min ago";

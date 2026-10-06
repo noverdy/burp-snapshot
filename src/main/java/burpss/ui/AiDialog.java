@@ -35,7 +35,7 @@ final class AiDialog extends JDialog {
 
     AiDialog(Window owner, String initial, boolean hasMarks, AiMarkup.Model model, String system,
              Function<String, String> prompt, Applier applier) {
-        super(owner, "AI markup", ModalityType.DOCUMENT_MODAL);
+        super(owner, "AI markup", ModalityType.MODELESS);
         context = new JTextArea(initial, 4, 44);
         context.setLineWrap(true);
         context.setWrapStyleWord(true);
@@ -69,7 +69,7 @@ final class AiDialog extends JDialog {
         body.add(options, BorderLayout.SOUTH);
 
         JButton cancel = new JButton("Cancel");
-        cancel.addActionListener(e -> close());
+        cancel.addActionListener(e -> dispose());
         generate.addActionListener(e -> run(model, system, prompt, applier));
         JPanel buttons = new JPanel(new BorderLayout());
         buttons.setBorder(BorderFactory.createEmptyBorder(4, 16, 12, 16));
@@ -128,9 +128,10 @@ final class AiDialog extends JDialog {
         status.setForeground(on ? muted("").getForeground() : new Color(0xD9822B));
     }
 
-    private void close() {
+    @Override
+    public void dispose() {
         if (worker != null) worker.cancel(true);
-        dispose();
+        super.dispose();
     }
 
     private static JPanel column() {

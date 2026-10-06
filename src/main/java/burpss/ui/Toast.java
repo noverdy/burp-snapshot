@@ -36,6 +36,7 @@ public final class Toast extends JWindow {
         JLabel title = new JLabel(message);
         title.setFont(title.getFont().deriveFont(Font.BOLD));
         JLabel sub = new JLabel(detail);
+        sub.putClientProperty("html.disable", Boolean.TRUE);
         Color muted = UIManager.getColor("Label.disabledForeground");
         sub.setForeground(muted == null ? Color.GRAY : muted);
         JPanel text = new JPanel(new GridLayout(0, 1, 0, 2));
@@ -82,7 +83,13 @@ public final class Toast extends JWindow {
             return;
         }
         dispose();
+    }
+
+    @Override
+    public void dispose() {
+        close.stop();
         if (current == this) current = null;
+        super.dispose();
     }
 
     private static Image thumbnail(BufferedImage image) {

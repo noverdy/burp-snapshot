@@ -11,7 +11,7 @@ import java.util.Map;
 
 public final class StateCodec {
 
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
 
     private StateCodec() {
     }
@@ -52,6 +52,8 @@ public final class StateCodec {
             for (int row : s.hiddenRows) out.writeInt(row);
             out.writeUTF(s.caption);
             out.writeUTF(s.aiContext);
+            out.writeInt(s.bodyOffset[0]);
+            out.writeInt(s.bodyOffset[1]);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -80,6 +82,10 @@ public final class StateCodec {
             if (version >= 2) {
                 s.caption = in.readUTF();
                 s.aiContext = in.readUTF();
+            }
+            if (version >= 3) {
+                s.bodyOffset[0] = in.readInt();
+                s.bodyOffset[1] = in.readInt();
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);

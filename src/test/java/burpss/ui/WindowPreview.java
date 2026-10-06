@@ -10,7 +10,6 @@ import burpss.core.ResultRow;
 import burpss.core.Settings;
 
 import javax.imageio.ImageIO;
-import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -37,7 +36,7 @@ public final class WindowPreview {
             Mark m = new Mark(Samples.tokenAnchor(1, ex.response, burpss.core.Token.Kind.JSON_MEMBER, "email"), 0);
             m.note = "PII of another user";
             ex.state.marks.add(m);
-            ExchangeWindow w = new ExchangeWindow(List.of(ex, ex), new Settings(), store);
+            ExchangeWindow w = new ExchangeWindow(null, List.of(ex, ex), new Settings(), store);
             w.open(null);
             w.setSize(1000, 820);
             w.validate();
@@ -61,7 +60,7 @@ public final class WindowPreview {
             }
             Settings ts = new Settings();
             ts.containsText = "dashboard";
-            TableWindow t = new TableWindow(rows, "POST", "https://app.example.com/login", "app.example.com", ts, store);
+            TableWindow t = new TableWindow(null, rows, "POST", "https://app.example.com/login", "app.example.com", ts, store);
             t.open(null);
             t.state().marks.add(new Mark(new burpss.core.Anchor.Rows(5, 5), 3));
             t.state().marks.get(0).note = "Only this credential pair redirects to the dashboard";
@@ -82,7 +81,7 @@ public final class WindowPreview {
         }
     }
 
-    static void capture(JFrame frame, File file) {
+    static void capture(EditorWindow frame, File file) {
         frame.validate();
         BufferedImage img = new BufferedImage(frame.getWidth(), frame.getHeight(), BufferedImage.TYPE_INT_RGB);
         frame.getRootPane().paintAll(img.createGraphics());

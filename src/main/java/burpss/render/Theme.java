@@ -37,7 +37,8 @@ public final class Theme {
         t.watermark = rgb(0x4B4B4B);
         t.accent = rgb(0xFF6633);
         t.editor(0x141414, 0x787878, 0x141414, 0x000075, 0x202020, 0x0000C0, 0xA01010, 0x202020,
-                0x000075, 0x008000, 0x0000FF, 0x000075, 0xB000C0, 0x000075);
+                0x000075, 0x008000, 0x0000FF, 0x000075, 0xA120B9, 0x0000B8);
+        t.code(0x93231B, 0x000070, 0x377E22, 0x0000F5, 0x255915);
         return t;
     }
 
@@ -59,7 +60,8 @@ public final class Theme {
         t.watermark = rgb(0xC5C7C8);
         t.accent = rgb(0xFF6633);
         t.editor(0xCECECE, 0xA0A0A0, 0xD1E8F9, 0xD1E8F9, 0xBABABA, 0xBBCDFF, 0xA5C35B, 0xD1E8F9,
-                0xE9C063, 0x93C763, 0x79C1F4, 0xFF9E57, 0xE9C063, 0xE9C063);
+                0xE9C063, 0x93C763, 0x79C1F4, 0xFF9E57, 0xE2C171, 0xBECCFB);
+        t.code(0xABC269, 0xF1A264, 0xABC269, 0x89BFEF, 0xA7B9BA);
         return t;
     }
 
@@ -82,6 +84,14 @@ public final class Theme {
         syntax(Style.KEYWORD, literal);
         syntax(Style.TAG, tag);
         syntax(Style.ATTR, attr);
+    }
+
+    private void code(int attrValue, int keyword, int string, int number, int comment) {
+        syntax(Style.ATTR_VALUE, attrValue);
+        syntax(Style.CODE_COMMENT, comment);
+        syntax(Style.CODE_KEYWORD, keyword);
+        syntax(Style.CODE_STRING, string);
+        syntax(Style.CODE_NUMBER, number);
     }
 
     public static Theme of(Settings settings) {

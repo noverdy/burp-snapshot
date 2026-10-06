@@ -87,6 +87,14 @@ public final class DisplayText {
                 if (pretty) prettyJson(start, end);
                 else copy(start, end);
             }
+            case MARKUP -> {
+                if (pretty) MarkupFormat.format(this, source.text(), start, end);
+                else copy(start, end);
+            }
+            case CSS, SCRIPT -> {
+                if (pretty) CodeFormat.format(this, source.text(), start, end, 0, source.bodyKind() == HttpText.BodyKind.SCRIPT);
+                else copy(start, end);
+            }
             case SSE -> {
                 int at = start;
                 for (TextRange json : pretty ? source.sseJson() : List.<TextRange>of()) {
@@ -100,7 +108,7 @@ public final class DisplayText {
         }
     }
 
-    private void copy(int from, int to) {
+    void copy(int from, int to) {
         String s = source.text();
         for (int i = from; i < to; i++) {
             char c = s.charAt(i);
@@ -177,7 +185,7 @@ public final class DisplayText {
         for (char c : s.toCharArray()) add(c, SYNTHETIC);
     }
 
-    private void add(char c, int from) {
+    void add(char c, int from) {
         if (text.length() == origin.length) origin = Arrays.copyOf(origin, origin.length * 2);
         origin[text.length()] = from;
         text.append(c);

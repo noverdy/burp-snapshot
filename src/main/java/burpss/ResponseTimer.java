@@ -1,5 +1,6 @@
 package burpss;
 
+import burp.api.montoya.core.ByteArray;
 import burp.api.montoya.http.handler.HttpHandler;
 import burp.api.montoya.http.handler.HttpRequestToBeSent;
 import burp.api.montoya.http.handler.HttpResponseReceived;
@@ -16,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class ResponseTimer implements HttpHandler {
 
     private static final int CAPACITY = 5000;
+    private static final int EDGE_BYTES = 4096;
 
     private final Map<Integer, Long> started = new ConcurrentHashMap<>();
     private final Map<Long, Long> elapsedMs = Collections.synchronizedMap(new LinkedHashMap<>(256, 0.75f, true) {
@@ -44,7 +46,12 @@ final class ResponseTimer implements HttpHandler {
     }
 
     private static long fingerprint(HttpResponse response) {
-        byte[] bytes = response.toByteArray().getBytes();
-        return ((long) bytes.length << 32) ^ Arrays.hashCode(bytes);
+        ByteArray bytes = response.toByteArray();
+        int length = bytes.length();
+        int edge = Math.min(length, EDGE_BYTES);
+        if (edge == 0) return 0;
+        long hash = 31L * Arrays.hashCode(bytes.subArray(0, edge).getBytes())
+                + Arrays.hashCode(bytes.subArray(length - edge, length).getBytes());
+        return ((long) length << 32) ^ hash;
     }
 }

@@ -7,6 +7,8 @@ import burpss.core.History;
 import burpss.core.HttpText;
 import burpss.core.Names;
 import burpss.core.Settings;
+import burpss.core.Template;
+import burpss.core.Templates;
 import burpss.core.TextRange;
 import burpss.core.Token;
 import burpss.render.Content;
@@ -18,6 +20,7 @@ import burpss.render.Theme;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPopupMenu;
+import java.awt.Window;
 import java.awt.geom.Point2D;
 import java.net.URI;
 import java.util.List;
@@ -30,8 +33,8 @@ public final class ExchangeWindow extends EditorWindow {
     private final List<Settings> itemSettings = new java.util.ArrayList<>();
     private ExchangeContent content;
 
-    public ExchangeWindow(List<Exchange> exchanges, Settings settings, Settings.Store store) {
-        super("Snapshot", settings, store, false);
+    public ExchangeWindow(Window owner, List<Exchange> exchanges, Settings settings, Settings.Store store) {
+        super(owner, "Snapshot", settings, store, false);
         this.exchanges = exchanges;
         this.current = exchanges.get(0);
         exchanges.forEach(e -> itemSettings.add(settings.copy()));
@@ -85,13 +88,29 @@ public final class ExchangeWindow extends EditorWindow {
 
     @Override
     String fileName() {
-        String path;
+        return ImageExport.fileName(current.host, current.method, path());
+    }
+
+    private String path() {
         try {
-            path = URI.create(current.url).getPath();
+            String path = URI.create(current.url).getPath();
+            return path == null ? "" : path;
         } catch (IllegalArgumentException e) {
-            path = "";
+            return "";
         }
-        return ImageExport.fileName(current.host, current.method, path == null ? "" : path);
+    }
+
+    @Override
+    Template captureTemplate() {
+        Template t = Templates.capture(current);
+        t.title = Template.generalize(t.title, current.method, path(), current.host, current.status);
+        t.caption = Template.generalize(t.caption, current.method, path(), current.host, current.status);
+        return t;
+    }
+
+    @Override
+    Templates.Applied applyTemplate(Template template) {
+        return Templates.apply(template, current, path());
     }
 
     @Override

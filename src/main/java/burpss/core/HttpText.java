@@ -8,7 +8,7 @@ import java.util.Locale;
 
 public final class HttpText {
 
-    public enum BodyKind { NONE, JSON, SSE, FORM, MARKUP, TEXT, BINARY }
+    public enum BodyKind { NONE, JSON, SSE, FORM, MARKUP, CSS, SCRIPT, TEXT, BINARY }
 
     public record HeaderLine(String name, int lineStart, int lineEnd, int valueStart, int valueEnd) {
         public boolean contains(int offset) {
@@ -102,6 +102,8 @@ public final class HttpText {
             case SSE -> parseSse(bodyStart, n);
             case FORM -> parseParams(bodyStart, trimEnd(bodyStart, n), Token.Kind.BODY_PARAM);
             case MARKUP -> parseMarkup(bodyStart, n);
+            case CSS -> parseCss(bodyStart, n);
+            case SCRIPT -> parseScript(bodyStart, n);
             default -> { }
         }
     }
@@ -239,7 +241,11 @@ public final class HttpText {
             return;
         }
         String head = text.substring(bodyStart, sampleEnd).strip();
-        if (contentType.contains("event-stream") || head.matches("(?s)(data|event|id|retry):.*")) {
+        if (contentType.contains("css")) {
+            bodyKind = BodyKind.CSS;
+        } else if (contentType.contains("javascript") || contentType.contains("ecmascript")) {
+            bodyKind = BodyKind.SCRIPT;
+        } else if (contentType.contains("event-stream") || head.matches("(?s)(data|event|id|retry):.*")) {
             bodyKind = BodyKind.SSE;
         } else if (contentType.contains("json") || head.startsWith("{") || head.startsWith("[")) {
             bodyKind = BodyKind.JSON;
@@ -394,10 +400,19 @@ public final class HttpText {
             if (text.startsWith("<!--", i)) {
                 int close = text.indexOf("-->", i + 4);
                 int j = close < 0 ? end : Math.min(end, close + 3);
-                style(i, j, Style.MUTED);
+                style(i, j, Style.CODE_COMMENT);
                 i = j;
             } else if (text.charAt(i) == '<') {
-                i = parseTag(i, end);
+                int tagEnd = parseTag(i, end);
+                String name = tagName(i, tagEnd);
+                if (name.equals("script") || name.equals("style")) {
+                    int close = indexOfIgnoreCase(text, "</" + name, tagEnd);
+                    int contentEnd = close < 0 || close > end ? end : close;
+                    if (name.equals("script")) parseScript(tagEnd, contentEnd);
+                    else parseCss(tagEnd, contentEnd);
+                    tagEnd = contentEnd;
+                }
+                i = tagEnd;
             } else {
                 i++;
             }
@@ -406,11 +421,13 @@ public final class HttpText {
 
     private int parseTag(int start, int end) {
         int i = start + 1;
-        style(start, i, Style.PUNCT);
-        while (i < end && (text.charAt(i) == '/' || text.charAt(i) == '!' || text.charAt(i) == '?')) {
-            style(i, i + 1, Style.PUNCT);
-            i++;
+        if (i < end && (text.charAt(i) == '!' || text.charAt(i) == '?')) {
+            int close = text.indexOf('>', i);
+            int j = close < 0 || close >= end ? end : close + 1;
+            style(start, j, Style.CODE_COMMENT);
+            return j;
         }
+        if (i < end && text.charAt(i) == '/') i++;
         int nameStart = i;
         while (i < end && !Character.isWhitespace(text.charAt(i)) && text.charAt(i) != '>' && text.charAt(i) != '/') {
             i++;
@@ -421,10 +438,12 @@ public final class HttpText {
             if (c == '"' || c == '\'') {
                 int close = text.indexOf(c, i + 1);
                 int j = close < 0 ? end : Math.min(end, close + 1);
-                style(i, j, Style.STRING);
+                style(i, j, Style.ATTR_VALUE);
                 i = j;
-            } else if (c == '=' || c == '/') {
+            } else if (c == '=') {
                 style(i, i + 1, Style.PUNCT);
+                i++;
+            } else if (c == '/') {
                 i++;
             } else if (Character.isWhitespace(c)) {
                 i++;
@@ -436,11 +455,134 @@ public final class HttpText {
                 style(s, i, Style.ATTR);
             }
         }
-        if (i < end) {
-            style(i, i + 1, Style.PUNCT);
-            i++;
+        return i < end ? i + 1 : i;
+    }
+
+    public static int indexOfIgnoreCase(String s, String needle, int from) {
+        for (int i = Math.max(0, from); i <= s.length() - needle.length(); i++) {
+            if (s.regionMatches(true, i, needle, 0, needle.length())) return i;
         }
-        return i;
+        return -1;
+    }
+
+    private String tagName(int start, int end) {
+        int i = start + 1;
+        int nameStart = i;
+        while (i < end && (Character.isLetterOrDigit(text.charAt(i)) || text.charAt(i) == '-')) i++;
+        return text.substring(nameStart, i).toLowerCase(Locale.ROOT);
+    }
+
+    private static final java.util.Set<String> JS_KEYWORDS = java.util.Set.of(
+            "var", "let", "const", "function", "return", "if", "else", "for", "while", "do", "switch", "case", "default",
+            "break", "continue", "new", "delete", "typeof", "instanceof", "in", "of", "this", "class", "extends", "super",
+            "import", "export", "from", "async", "await", "try", "catch", "finally", "throw", "yield", "void",
+            "true", "false", "null", "undefined");
+
+    private void parseScript(int start, int end) {
+        int i = start;
+        while (i < end) {
+            char c = text.charAt(i);
+            char next = i + 1 < end ? text.charAt(i + 1) : 0;
+            if (c == '/' && (next == '*' || next == '/')) {
+                i = comment(i, end);
+            } else if (c == '"' || c == '\'' || c == '`') {
+                i = quoted(i, end);
+            } else if (Character.isDigit(c) && (i == start || !scriptWordChar(text.charAt(i - 1)))) {
+                int j = i;
+                while (j < end && (Character.isLetterOrDigit(text.charAt(j)) || text.charAt(j) == '.')) j++;
+                style(i, j, Style.CODE_NUMBER);
+                i = j;
+            } else if (scriptWordChar(c)) {
+                int j = i + 1;
+                while (j < end && scriptWordChar(text.charAt(j))) j++;
+                if (JS_KEYWORDS.contains(text.substring(i, j)) && (i == start || text.charAt(i - 1) != '.')) style(i, j, Style.CODE_KEYWORD);
+                i = j;
+            } else {
+                i++;
+            }
+        }
+    }
+
+    private void parseCss(int start, int end) {
+        int i = start;
+        while (i < end) {
+            int j = i;
+            while (j < end && "{;}".indexOf(text.charAt(j)) < 0) {
+                char c = text.charAt(j);
+                if (c == '/' && j + 1 < end && text.charAt(j + 1) == '*') j = comment(j, end);
+                else if (c == '"' || c == '\'') j = quoted(j, end);
+                else j++;
+            }
+            if (j < end && text.charAt(j) == '{') {
+                style(i, j, Style.CODE_KEYWORD);
+                cssLiterals(i, j, false);
+            } else {
+                int colon = i;
+                while (colon < j && text.charAt(colon) != ':') colon++;
+                if (colon < j) {
+                    style(i, colon, Style.CODE_KEYWORD);
+                    style(colon, colon + 1, Style.PUNCT);
+                    cssLiterals(i, colon, false);
+                    cssLiterals(colon + 1, j, true);
+                } else {
+                    cssLiterals(i, j, true);
+                }
+            }
+            if (j < end) style(j, j + 1, Style.PUNCT);
+            i = j + 1;
+        }
+    }
+
+    private void cssLiterals(int start, int end, boolean numbers) {
+        int i = start;
+        while (i < end) {
+            char c = text.charAt(i);
+            char next = i + 1 < end ? text.charAt(i + 1) : 0;
+            boolean numberStart = Character.isDigit(c) || (c == '#' && Character.isLetterOrDigit(next))
+                    || ((c == '.' || c == '-') && Character.isDigit(next));
+            if (c == '/' && next == '*') {
+                i = comment(i, end);
+            } else if (c == '"' || c == '\'') {
+                i = quoted(i, end);
+            } else if (numbers && numberStart && (i == start || !cssWordChar(text.charAt(i - 1)))) {
+                int j = i + 1;
+                while (j < end && (Character.isLetterOrDigit(text.charAt(j)) || text.charAt(j) == '.' || text.charAt(j) == '%')) j++;
+                style(i, j, Style.CODE_NUMBER);
+                i = j;
+            } else {
+                i++;
+            }
+        }
+    }
+
+    private int comment(int i, int end) {
+        int j;
+        if (text.charAt(i + 1) == '*') {
+            int close = text.indexOf("*/", i + 2);
+            j = close < 0 || close + 2 > end ? end : close + 2;
+        } else {
+            j = i;
+            while (j < end && text.charAt(j) != '\n') j++;
+        }
+        style(i, j, Style.CODE_COMMENT);
+        return j;
+    }
+
+    private int quoted(int i, int end) {
+        char quote = text.charAt(i);
+        int j = i + 1;
+        while (j < end && text.charAt(j) != quote && (quote == '`' || text.charAt(j) != '\n')) j += text.charAt(j) == '\\' ? 2 : 1;
+        j = Math.min(end, j + 1);
+        style(i, j, Style.CODE_STRING);
+        return j;
+    }
+
+    private static boolean scriptWordChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_' || c == '$';
+    }
+
+    private static boolean cssWordChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '-' || c == '_';
     }
 
     private void style(int s, int e, Style style) {
