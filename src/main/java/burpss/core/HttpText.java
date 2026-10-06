@@ -20,6 +20,7 @@ public final class HttpText {
     private final boolean request;
     private final Style[] styles;
     private final List<Token> tokens = new ArrayList<>();
+    private final List<TextRange> jsonScalars = new ArrayList<>();
     private final List<HeaderLine> headers = new ArrayList<>();
     private int bodyStart;
     private BodyKind bodyKind = BodyKind.NONE;
@@ -41,6 +42,7 @@ public final class HttpText {
     public String text() { return text; }
     public Style styleAt(int offset) { return styles[offset]; }
     public List<Token> tokens() { return Collections.unmodifiableList(tokens); }
+    public List<TextRange> jsonScalars() { return Collections.unmodifiableList(jsonScalars); }
     public List<HeaderLine> headers() { return Collections.unmodifiableList(headers); }
     public int bodyStart() { return bodyStart; }
     public BodyKind bodyKind() { return bodyKind; }
@@ -310,6 +312,8 @@ public final class HttpText {
         for (int k = 0; k < lex.size(); k++) {
             int[] l = lex.get(k);
             boolean isKey = l[0] == STR && k + 1 < lex.size() && lex.get(k + 1)[0] == COLON;
+            if (l[0] == STR && !isKey && l[2] - l[1] > 2) jsonScalars.add(new TextRange(l[1] + 1, l[2] - 1));
+            if (l[0] == NUM) jsonScalars.add(new TextRange(l[1], l[2]));
             switch (l[0]) {
                 case STR -> style(l[1], l[2], isKey ? Style.JSON_KEY : Style.STRING);
                 case NUM -> style(l[1], l[2], Style.NUMBER);

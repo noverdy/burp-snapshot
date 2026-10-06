@@ -21,7 +21,11 @@ import burpss.render.Theme;
 import burpss.ui.EditorWindow;
 import burpss.ui.SnapshotsTab;
 
+import javax.imageio.ImageIO;
+import java.awt.Image;
 import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
@@ -201,15 +205,26 @@ final class SnapshotLibrary implements SnapshotsTab.Source {
     public BufferedImage preview(String id) {
         if (entry(id) == null) return null;
         Settings s = settings(id);
-        Theme theme = Theme.of(s);
-        if (isTable(id)) {
-            Table t = table(id);
-            Content content = new TableContent(t.rows(), t.state(), s, theme);
-            return new Scene(content, new HeaderInfo(t.state().title, t.method(), t.url(), t.host(), 0, "", -1), t.state().marks, s, null).toImage(1);
-        }
-        Exchange e = exchange(id);
+        return isTable(id) ? render(table(id), s, 1) : render(exchange(id), s, 1);
+    }
+
+    static BufferedImage render(Exchange e, Settings s, int scale) {
         HeaderInfo header = new HeaderInfo(e.state.title, e.method, e.url, e.host, e.status, e.reason, e.timeMs);
-        return new Scene(new ExchangeContent(e, s, theme), header, e.state.marks, s, null).toImage(1);
+        return new Scene(new ExchangeContent(e, s, Theme.of(s)), header, e.state.marks, s, logo(s)).toImage(scale);
+    }
+
+    static BufferedImage render(Table t, Settings s, int scale) {
+        Content content = new TableContent(t.rows(), t.state(), s, Theme.of(s));
+        HeaderInfo header = new HeaderInfo(t.state().title, t.method(), t.url(), t.host(), 0, "", -1);
+        return new Scene(content, header, t.state().marks, s, logo(s)).toImage(scale);
+    }
+
+    private static Image logo(Settings s) {
+        try {
+            return s.watermarkLogo.isBlank() ? null : ImageIO.read(new File(s.watermarkLogo));
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     @Override

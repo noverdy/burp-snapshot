@@ -38,9 +38,16 @@ public final class AutoRedactor {
                     }
                 }
                 case JSON_MEMBER -> {
-                    char first = t.hasValue() ? message.text().charAt(t.valueStart()) : ' ';
-                    if (Names.containsAny(keywords, t.name()) && first != '{' && first != '[') {
+                    if (!Names.containsAny(keywords, t.name()) || !t.hasValue()) {
+                        break;
+                    }
+                    char first = message.text().charAt(t.valueStart());
+                    if (first != '{' && first != '[') {
                         addValue(out, t);
+                    } else {
+                        message.jsonScalars().stream()
+                                .filter(r -> r.start() >= t.valueStart() && r.end() <= t.valueEnd())
+                                .forEach(out::add);
                     }
                 }
                 default -> { }

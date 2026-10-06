@@ -16,14 +16,14 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 
-final class ImageExport {
+public final class ImageExport {
 
     private ImageExport() {
     }
 
     private static final DataFlavor PNG = pngFlavor();
 
-    static void copy(BufferedImage image) throws IOException {
+    public static void copy(BufferedImage image) throws IOException {
         byte[] png = encode(image);
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new Transferable() {
             public DataFlavor[] getTransferDataFlavors() { return new DataFlavor[]{PNG, DataFlavor.imageFlavor}; }

@@ -49,6 +49,11 @@ public final class TableWindow extends EditorWindow {
     }
 
     @Override
+    boolean timeAvailable() {
+        return rows.stream().anyMatch(r -> r.timeMs() >= 0);
+    }
+
+    @Override
     String fileName() {
         return ImageExport.fileName(host, method, "results");
     }

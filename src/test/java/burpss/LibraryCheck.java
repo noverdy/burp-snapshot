@@ -155,13 +155,30 @@ public final class LibraryCheck {
         capture(library);
         library.delete(kept);
         check("delete removes the entry", library.entries().stream().noneMatch(e -> e.id().equals(kept)) && changes[0] > 0);
+        String json = "POST /api HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n\r\n"
+                + "{\"tokens\":[\"aaaa1111\",\"bbbb2222\"],\"session\":{\"id\":\"cccc3333\",\"n\":42},\"user\":\"bob\"}";
+        HttpText parsed = HttpText.parse(json, true);
+        List<String> redacted = burpss.core.AutoRedactor.find(parsed, new Settings()).stream()
+                .map(r -> json.substring(r.start(), r.end())).toList();
+        check("auto-redaction covers values inside arrays and objects under sensitive keys",
+                redacted.equals(List.of("aaaa1111", "bbbb2222", "cccc3333", "42")));
+
+        burpss.core.Shortcuts keys = new burpss.core.Shortcuts();
+        check("quick copy title template expands", keys.title("POST", "/api/login", "x", 200).equals("POST /api/login"));
+        check("Burp default hotkeys are detected regardless of modifier order", burpss.core.Shortcuts.usedByBurp("Shift+Ctrl+R")
+                && !burpss.core.Shortcuts.usedByBurp(burpss.core.Shortcuts.QUICK_COPY)
+                && !burpss.core.Shortcuts.usedByBurp(burpss.core.Shortcuts.OPEN));
+        int menu = java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        java.awt.event.KeyEvent press = new java.awt.event.KeyEvent(new java.awt.Label(), java.awt.event.KeyEvent.KEY_PRESSED, 0,
+                menu | java.awt.event.InputEvent.SHIFT_DOWN_MASK, java.awt.event.KeyEvent.VK_C, 'C');
+        check("recorded key press uses Burp's hotkey format", "Ctrl+Shift+C".equals(burpss.ui.PreferencesDialog.record(press)));
         System.out.println(failures == 0 ? "ALL PASSED" : failures + " FAILED");
         System.exit(failures == 0 ? 0 : 1);
     }
 
     private static void capture(SnapshotLibrary library) throws Exception {
         javax.swing.SwingUtilities.invokeAndWait(() -> {
-            SnapshotsTab tab = new SnapshotsTab(library);
+            SnapshotsTab tab = new SnapshotsTab(library, () -> { });
             javax.swing.JFrame frame = new javax.swing.JFrame();
             frame.setContentPane(tab);
             frame.addNotify();

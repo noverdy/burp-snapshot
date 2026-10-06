@@ -64,6 +64,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     protected final Canvas canvas = new Canvas(this);
     private final boolean table;
     private JScrollPane sidebar;
+    private SettingsPanel settingsPanel;
     private final JTextField titleField = new JTextField(40);
     private final JComboBox<String> zoom = new JComboBox<>(new String[]{"Fit", "50%", "75%", "100%", "150%", "200%"});
     private final JLabel status = new JLabel(" ");
@@ -143,6 +144,11 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     void rebuild() {
         scene = new Scene(buildContent(Theme.of(settings)), header(), state().marks, settings, logo());
         canvas.setScene(scene);
+        settingsPanel.timeAvailable(timeAvailable());
+    }
+
+    boolean timeAvailable() {
+        return header().timeMs() >= 0;
     }
 
     void edit(Runnable mutation) {
@@ -182,7 +188,8 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     }
 
     private JScrollPane sidebar() {
-        JScrollPane pane = new SettingsPanel(settings, table, this::settingsChanged, () -> settings.save(store)).scrollable();
+        settingsPanel = new SettingsPanel(settings, table, this::settingsChanged, () -> settings.save(store));
+        JScrollPane pane = settingsPanel.scrollable();
         pane.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, UIManager.getColor("Separator.foreground")));
         return pane;
     }

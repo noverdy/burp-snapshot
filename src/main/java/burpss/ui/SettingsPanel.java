@@ -53,11 +53,15 @@ final class SettingsPanel extends JPanel {
     private final Runnable onPreference;
     private JPanel body;
     private final java.util.List<JLabel> captions = new java.util.ArrayList<>();
+    private final boolean table;
+    private JCheckBox timeBox;
+    private final JLabel timeHint = new JLabel();
 
     SettingsPanel(Settings settings, boolean table, Runnable onChange, Runnable onPreference) {
         this.onPreference = onPreference;
         this.s = settings;
         this.onChange = onChange;
+        this.table = table;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBorder(BorderFactory.createEmptyBorder(10, 12, 12, 12));
 
@@ -71,7 +75,11 @@ final class SettingsPanel extends JPanel {
         } else {
             segmented("Redaction", Settings.RedactStyle.values(), () -> s.redactStyle, v -> s.redactStyle = v);
         }
-        check("Show response time", () -> s.showTime, v -> s.showTime = v);
+        timeBox = check("Show response time", () -> s.showTime, v -> s.showTime = v);
+        timeHint.setForeground(secondaryText());
+        timeHint.setFont(timeHint.getFont().deriveFont(timeHint.getFont().getSize2D() - 1f));
+        timeHint.setVisible(false);
+        wide(timeHint);
         watermarkQuick();
         segmented("Export scale", new String[]{"1x", "2x", "3x"}, s.exportScale - 1, i -> s.exportScale = i + 1);
 
@@ -265,7 +273,15 @@ final class SettingsPanel extends JPanel {
         row(label, box);
     }
 
-    private void check(String label, Supplier<Boolean> get, Consumer<Boolean> set) {
+    void timeAvailable(boolean available) {
+        boolean needsHeaderBar = available && !table && !s.showHeaderBar;
+        timeBox.setEnabled(available && !needsHeaderBar);
+        timeHint.setText(!available ? "Not available for " + (table ? "these requests" : "this request")
+                : needsHeaderBar ? "Turn on the header bar in Frame & text" : "");
+        timeHint.setVisible(!available || needsHeaderBar);
+    }
+
+    private JCheckBox check(String label, Supplier<Boolean> get, Consumer<Boolean> set) {
         JCheckBox box = new JCheckBox(label);
         box.setSelected(get.get());
         box.addActionListener(e -> {
@@ -273,6 +289,7 @@ final class SettingsPanel extends JPanel {
             onChange.run();
         });
         wide(box);
+        return box;
     }
 
     private void number(String label, int min, int max, Supplier<Integer> get, IntConsumer set) {

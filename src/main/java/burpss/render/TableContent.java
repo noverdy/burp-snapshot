@@ -37,7 +37,7 @@ public final class TableContent implements Content {
         this.head = Fonts.sans(11, true);
         for (ResultRow r : all) if (!state.hiddenRows.contains(r.number())) rows.add(r);
         columns.addAll(List.of("#", "Payload", "Status", "Length"));
-        if (all.stream().anyMatch(r -> r.timeMs() >= 0)) columns.add("Time");
+        if (settings.showTime && all.stream().anyMatch(r -> r.timeMs() >= 0)) columns.add("Time");
         if (!contains.isEmpty()) columns.add("Contains “" + contains + "”");
     }
 

@@ -17,6 +17,7 @@ A Burp Suite extension that turns a request and response into a clean PNG for yo
 - A tiled watermark with `{date}` and `{host}` placeholders and an optional logo.
 - Intruder results as a table, with the payloads worked out from the selected requests.
 - Copy to the clipboard or save a PNG at 1x, 2x or 3x.
+- Hotkeys: copy a snapshot straight to the clipboard without opening a window, or open the editor.
 - Autosave into the Burp project, with a **Snapshot** tab to reopen drafts and exported snapshots.
 
 > [!IMPORTANT]
@@ -60,6 +61,19 @@ In the Snapshot window:
 > [!TIP]
 > Select text in Burp's message editor before you right-click and the snapshot opens with that text already boxed.
 
+### Hotkeys
+
+| Hotkey | What it does |
+|---|---|
+| `⌘⇧C` / `Ctrl+Shift+C` | Quick copy: renders the selected request with your last settings and auto-redaction and copies the PNG. No window opens. |
+| `⌘⇧X` / `Ctrl+Shift+X` | Opens the selected request in the Snapshot editor |
+
+Both work in message editors, Proxy history, Intruder results, the site map and Organizer. With two or more rows selected, you get a results table. Text you selected in the editor is boxed already.
+
+After a quick copy, a small notification shows a thumbnail with an **Open** button. The copy is saved under **Exported**, so you can fix it later. Quick copy skips the review step, so check the thumbnail: auto-redaction only knows the names in your redaction rules.
+
+To change the keys or the quick copy title (default `{method} {path}`), click the gear in the **Snapshot** tab.
+
 ### Intruder results
 
 In the attack results window, select two or more rows (Shift-click for a range), then right-click and choose **Extensions → Snapshot → Snapshot as results table…** The same item shows up in Proxy history and Logger.
@@ -89,7 +103,7 @@ The project stores the request, the response, your edits (marks, notes, redactio
 
 The sidebar keeps the per-screenshot options at the top: theme, layout, mark color, note style, redaction style, watermark text and export scale. Redaction rules, hidden headers, body truncation, line wrapping and watermark styling sit in collapsible sections below. Settings belong to each snapshot. New snapshots start with the settings you used last, which Snapshot keeps in Burp's preferences across projects.
 
-Response time comes from Burp's timing data when it exists. Otherwise the extension times requests itself while loaded, so a Repeater response sent before you loaded Snapshot has no time to show. Send it once more.
+Response time comes from Burp's timing data, including Proxy history and the time Repeater shows under the response. For tools without timing data, the extension times requests itself while it's loaded. When no time is known, the sidebar says so under **Show response time**. The time appears in the header bar, or as a column in results tables.
 
 ## Build from source
 

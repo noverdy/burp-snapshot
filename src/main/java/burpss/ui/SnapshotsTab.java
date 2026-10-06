@@ -61,9 +61,12 @@ public final class SnapshotsTab extends JPanel {
     private final JToggleButton exportedTab = new JToggleButton("Exported");
     private final Preview preview = new Preview();
 
-    public SnapshotsTab(Source source) {
+    private final Runnable onPreferences;
+
+    public SnapshotsTab(Source source, Runnable onPreferences) {
         super(new BorderLayout());
         this.source = source;
+        this.onPreferences = onPreferences;
         listCards.add(new JScrollPane(draftList), "drafts");
         listCards.add(new JScrollPane(exportedList), "exported");
 
@@ -112,8 +115,19 @@ public final class SnapshotsTab extends JPanel {
         JPanel header = new JPanel(new BorderLayout());
         header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, UIManager.getColor("Separator.foreground")));
         header.add(tabs, BorderLayout.WEST);
-        header.add(new HelpMark("Drafts: last 20 unexported snapshots. Exported: copied or saved at least once. Stored in this Burp project."),
-                BorderLayout.EAST);
+        JPanel icons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
+        icons.setOpaque(false);
+        HeaderIcon gear = new HeaderIcon(true, "Snapshot settings: hotkeys and quick copy title");
+        gear.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        gear.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                onPreferences.run();
+            }
+        });
+        icons.add(new HeaderIcon(false, "Drafts: last 20 unexported snapshots. Exported: copied or saved at least once. Stored in this Burp project."));
+        icons.add(gear);
+        header.add(icons, BorderLayout.EAST);
         return header;
     }
 
@@ -125,11 +139,14 @@ public final class SnapshotsTab extends JPanel {
                 BorderFactory.createEmptyBorder(8, 14, 6, 14)));
     }
 
-    private static final class HelpMark extends JComponent {
+    private static final class HeaderIcon extends JComponent {
 
-        HelpMark(String tooltip) {
+        private final boolean gear;
+
+        HeaderIcon(boolean gear, String tooltip) {
+            this.gear = gear;
             setToolTipText(tooltip);
-            setPreferredSize(new java.awt.Dimension(40, 30));
+            setPreferredSize(new java.awt.Dimension(gear ? 40 : 30, 30));
         }
 
         @Override
@@ -137,15 +154,29 @@ public final class SnapshotsTab extends JPanel {
             Graphics2D g = (Graphics2D) g0.create();
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            int d = 18, x = getWidth() - d - 12, y = (getHeight() - d) / 2;
+            int d = 18, x = getWidth() - d - (gear ? 12 : 4), y = (getHeight() - d) / 2;
             Color fg = UIManager.getColor("Label.disabledForeground");
             g.setColor(fg == null ? Color.GRAY : fg);
-            g.setStroke(new java.awt.BasicStroke(1.4f));
-            g.drawOval(x, y, d, d);
-            g.setFont(getFont().deriveFont(Font.BOLD, 12f));
-            java.awt.FontMetrics fm = g.getFontMetrics();
-            g.drawString("?", x + (d - fm.stringWidth("?")) / 2f + 0.5f, y + (d + fm.getAscent() - fm.getDescent()) / 2f);
+            if (gear) {
+                g.fill(gearShape(x + d / 2.0, y + d / 2.0));
+            } else {
+                g.setStroke(new java.awt.BasicStroke(1.4f));
+                g.drawOval(x, y, d, d);
+                g.setFont(getFont().deriveFont(Font.BOLD, 12f));
+                java.awt.FontMetrics fm = g.getFontMetrics();
+                g.drawString("?", x + (d - fm.stringWidth("?")) / 2f + 0.5f, y + (d + fm.getAscent() - fm.getDescent()) / 2f);
+            }
             g.dispose();
+        }
+
+        private static java.awt.Shape gearShape(double cx, double cy) {
+            java.awt.geom.Area area = new java.awt.geom.Area(new java.awt.geom.Ellipse2D.Double(cx - 6.5, cy - 6.5, 13, 13));
+            for (int i = 0; i < 8; i++) {
+                java.awt.geom.AffineTransform turn = java.awt.geom.AffineTransform.getRotateInstance(Math.PI / 4 * i, cx, cy);
+                area.add(new java.awt.geom.Area(turn.createTransformedShape(new java.awt.geom.Rectangle2D.Double(cx - 1.8, cy - 9, 3.6, 4))));
+            }
+            area.subtract(new java.awt.geom.Area(new java.awt.geom.Ellipse2D.Double(cx - 3, cy - 3, 6, 6)));
+            return area;
         }
     }
 
