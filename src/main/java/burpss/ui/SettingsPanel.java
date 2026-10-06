@@ -110,13 +110,17 @@ final class SettingsPanel extends JPanel {
         segmented("Frame", Settings.Frame.values(), () -> s.frame, v -> s.frame = v);
         check("Header bar", () -> s.showHeaderBar, v -> s.showHeaderBar = v);
         check("Number noted marks", () -> s.numberMarks, v -> s.numberMarks = v);
+        check("Caption under the content", () -> s.showCaption, v -> s.showCaption = v);
         number("Font size", 9, 24, () -> s.fontSize, v -> s.fontSize = v);
         alignCaptions();
     }
 
-    JScrollPane scrollable() {
+    JScrollPane scrollable(JComponent header) {
+        JPanel column = new JPanel(new BorderLayout());
+        column.add(header, BorderLayout.NORTH);
+        column.add(this, BorderLayout.CENTER);
         JPanel top = new ViewportWidthPanel();
-        top.add(this, BorderLayout.NORTH);
+        top.add(column, BorderLayout.NORTH);
         JScrollPane pane = new JScrollPane(top, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         pane.setBorder(BorderFactory.createEmptyBorder());
         pane.getVerticalScrollBar().setUnitIncrement(16);
@@ -189,8 +193,11 @@ final class SettingsPanel extends JPanel {
     }
 
     private static Color secondaryText() {
-        Color c = UIManager.getColor("Label.disabledForeground");
-        return c == null ? Color.GRAY : c.darker();
+        Color fg = UIManager.getColor("Label.foreground"), bg = UIManager.getColor("Panel.background");
+        if (fg == null || bg == null) return Color.GRAY;
+        double k = 0.72;
+        return new Color((int) (fg.getRed() * k + bg.getRed() * (1 - k)), (int) (fg.getGreen() * k + bg.getGreen() * (1 - k)),
+                (int) (fg.getBlue() * k + bg.getBlue() * (1 - k)));
     }
 
     private <E extends Enum<E>> void segmented(String label, E[] values, Supplier<E> get, Consumer<E> set) {

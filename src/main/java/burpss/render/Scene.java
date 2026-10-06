@@ -38,8 +38,10 @@ public final class Scene {
 
     private final Rectangle2D card;
     private final Rectangle2D contentArea;
-    private final double headerH, titleH, legendH;
+    private final double headerH, titleH, legendH, captionH;
+    private final List<String> captionLines;
     private final List<Rectangle2D> markBoxes = new ArrayList<>();
+    private final List<List<Rectangle2D>> markSegments = new ArrayList<>();
     private final List<Rectangle2D> callouts = new ArrayList<>();
     private final List<List<String>> calloutLines = new ArrayList<>();
     private final Rectangle2D imageBounds;
@@ -57,16 +59,18 @@ public final class Scene {
         content.layout(MIN_CARD_W);
         double cardW = content.width();
         legendH = legendHeight(cardW);
+        captionLines = settings.showCaption && !header.caption().isBlank()
+                ? wrap(header.caption(), uiFont, cardW - 2 * CARD_PAD) : List.of();
+        captionH = captionLines.isEmpty() ? 0 : 2 * CARD_PAD - 4 + captionLines.size() * lineHeight(uiFont);
         double margin = settings.frame == Settings.Frame.SHOWCASE ? 56 : 0;
-        card = new Rectangle2D.Double(margin, margin, cardW, titleH + headerH + content.height() + legendH);
+        card = new Rectangle2D.Double(margin, margin, cardW, titleH + headerH + content.height() + legendH + captionH);
         contentArea = new Rectangle2D.Double(card.getX(), card.getY() + titleH + headerH, content.width(), content.height());
 
         Rectangle2D bounds = (Rectangle2D) card.clone();
         for (Mark m : marks) {
             Rectangle2D local = content.bounds(m.anchor);
-            markBoxes.add(local == null ? null : new Rectangle2D.Double(
-                    local.getX() + contentArea.getX() - 3, local.getY() + contentArea.getY() - 1,
-                    local.getWidth() + 6, local.getHeight() + 2));
+            markBoxes.add(local == null ? null : pad(local));
+            markSegments.add(content.segments(m.anchor).stream().map(this::pad).toList());
         }
         for (int i = 0; i < marks.size(); i++) {
             Mark m = marks.get(i);
@@ -131,6 +135,16 @@ public final class Scene {
                 local.getY() + contentArea.getY() - imageBounds.getY(), local.getWidth(), local.getHeight());
     }
 
+    private Rectangle2D pad(Rectangle2D local) {
+        return new Rectangle2D.Double(local.getX() + contentArea.getX() - 3, local.getY() + contentArea.getY() - 1,
+                local.getWidth() + 6, local.getHeight() + 2);
+    }
+
+    private List<Rectangle2D> outline(int index) {
+        List<Rectangle2D> segments = markSegments.get(index);
+        return segments.size() > 1 ? segments : List.of(markBoxes.get(index));
+    }
+
     public Point2D calloutOffset(int index) {
         Rectangle2D box = markBoxes.get(index), callout = callouts.get(index);
         return new Point2D.Double(callout.getX() - box.getX(), callout.getY() - box.getY());
@@ -157,6 +171,7 @@ public final class Scene {
     private double penalty(int index, Rectangle2D c) {
         double score = 0;
         if (!card.contains(c)) score += card.intersects(c) ? 100_000 : 400;
+        if (c.intersects(card.getX(), contentArea.getMaxY(), card.getWidth(), legendH + captionH)) score += 20_000;
         for (int i = 0; i < markBoxes.size(); i++) {
             if (markBoxes.get(i) != null && markBoxes.get(i).intersects(c)) score += 10_000;
         }
@@ -255,6 +270,7 @@ public final class Scene {
         content.paint(c);
         c.dispose();
         if (legendH > 0) paintLegend(clip, contentArea.getMaxY());
+        if (captionH > 0) paintCaption(clip, contentArea.getMaxY() + legendH);
         clip.dispose();
 
         g.setColor(theme.border);
@@ -334,6 +350,20 @@ public final class Scene {
         return h;
     }
 
+    private void paintCaption(Graphics2D g, double top) {
+        g.setColor(theme.headerBar);
+        g.fill(new Rectangle2D.Double(card.getX(), top, card.getWidth(), captionH));
+        g.setColor(theme.border);
+        g.draw(new Line2D.Double(card.getX(), top + 0.5, card.getMaxX(), top + 0.5));
+        g.setFont(uiFont);
+        g.setColor(theme.text);
+        double y = top + CARD_PAD - 2 + Fonts.ascent(uiFont);
+        for (String line : captionLines) {
+            g.drawString(line, (float) (card.getX() + CARD_PAD), (float) y);
+            y += lineHeight(uiFont);
+        }
+    }
+
     private void paintLegend(Graphics2D g, double top) {
         g.setColor(theme.headerBar);
         g.fill(new Rectangle2D.Double(card.getX(), top, card.getWidth(), legendH));
@@ -362,18 +392,29 @@ public final class Scene {
             Color color = marks.get(i).awtColor();
             g.setColor(color);
             g.setStroke(new BasicStroke(2f));
-            g.draw(new RoundRectangle2D.Double(box.getX(), box.getY(), box.getWidth(), box.getHeight(), 6, 6));
+            for (Rectangle2D part : outline(i)) {
+                g.draw(new RoundRectangle2D.Double(part.getX(), part.getY(), part.getWidth(), part.getHeight(), 6, 6));
+            }
             Rectangle2D callout = callouts.get(i);
             if (callout != null) paintCallout(g, i, box, callout, color);
         }
         for (int i = 0; i < marks.size(); i++) {
-            Rectangle2D box = markBoxes.get(i);
-            if (numbered(i)) badge(g, box.getX() - 3, box.getY() - 3, number(i), marks.get(i).awtColor());
+            if (!numbered(i)) continue;
+            Rectangle2D first = outline(i).get(0);
+            badge(g, first.getX() - 3, first.getY() - 3, number(i), marks.get(i).awtColor());
         }
     }
 
     private void paintCallout(Graphics2D g, int index, Rectangle2D box, Rectangle2D callout, Color color) {
         Point2D target = closest(box, center(callout));
+        double nearest = Double.MAX_VALUE;
+        for (Rectangle2D part : outline(index)) {
+            Point2D p = closest(part, center(callout));
+            if (p.distance(center(callout)) < nearest) {
+                nearest = p.distance(center(callout));
+                target = p;
+            }
+        }
         Point2D source = closest(callout, target);
         g.setStroke(new BasicStroke(1.5f));
         g.setColor(color);

@@ -8,21 +8,40 @@ import burp.api.montoya.internal.MontoyaObjectFactory;
 import burp.api.montoya.internal.ObjectFactoryLocator;
 import burp.api.montoya.persistence.PersistedList;
 import burp.api.montoya.persistence.PersistedObject;
+import burpss.ai.AiMarkup;
 import burpss.core.Anchor;
+import burpss.core.AutoRedactor;
 import burpss.core.EditState;
 import burpss.core.Exchange;
 import burpss.core.HttpText;
 import burpss.core.Mark;
+import burpss.core.ResultRow;
 import burpss.core.Settings;
+import burpss.core.Shortcuts;
 import burpss.core.StateCodec;
 import burpss.core.TextRange;
+import burpss.render.DisplayText;
+import burpss.render.ExchangeContent;
+import burpss.render.TableContent;
+import burpss.render.Theme;
 import burpss.ui.EditorWindow;
+import burpss.ui.ExchangeWindow;
+import burpss.ui.PreferencesDialog;
 import burpss.ui.SnapshotsTab;
 
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Label;
+import java.awt.Toolkit;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.geom.Point2D;
+import java.awt.geom.Rectangle2D;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -124,17 +143,17 @@ public final class LibraryCheck {
         java.awt.image.BufferedImage darkPreview = library.preview(darkId);
         check("each entry keeps its own settings", library.settings(darkId).theme == Settings.ThemeName.DARK
                 && library.settings(darkId).layout == Settings.Layout.STACKED
-                && new java.awt.Color(darkPreview.getRGB(5, darkPreview.getHeight() / 2)).getRed() < 80);
+                && new Color(darkPreview.getRGB(5, darkPreview.getHeight() / 2)).getRed() < 80);
 
         List<EditorWindow.Update> updates = new ArrayList<>();
-        java.util.Map<String, String> prefs = new HashMap<>();
+        Map<String, String> prefs = new HashMap<>();
         Settings.Store store = new Settings.Store() {
             public String get(String key) { return prefs.get(key); }
             public void set(String key, String value) { prefs.put(key, value); }
         };
-        burpss.ui.ExchangeWindow[] window = new burpss.ui.ExchangeWindow[1];
+        ExchangeWindow[] window = new ExchangeWindow[1];
         javax.swing.SwingUtilities.invokeAndWait(() -> {
-            window[0] = new burpss.ui.ExchangeWindow(List.of(exchange), new Settings(), store);
+            window[0] = new ExchangeWindow(List.of(exchange), new Settings(), store);
             window[0].onUpdate(updates::add);
             window[0].open(null);
             click(window[0], "Purple");
@@ -158,20 +177,99 @@ public final class LibraryCheck {
         String json = "POST /api HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n\r\n"
                 + "{\"tokens\":[\"aaaa1111\",\"bbbb2222\"],\"session\":{\"id\":\"cccc3333\",\"n\":42},\"user\":\"bob\"}";
         HttpText parsed = HttpText.parse(json, true);
-        List<String> redacted = burpss.core.AutoRedactor.find(parsed, new Settings()).stream()
+        List<String> redacted = AutoRedactor.find(parsed, new Settings()).stream()
                 .map(r -> json.substring(r.start(), r.end())).toList();
         check("auto-redaction covers values inside arrays and objects under sensitive keys",
                 redacted.equals(List.of("aaaa1111", "bbbb2222", "cccc3333", "42")));
 
-        burpss.core.Shortcuts keys = new burpss.core.Shortcuts();
+        Shortcuts keys = new Shortcuts();
         check("quick copy title template expands", keys.title("POST", "/api/login", "x", 200).equals("POST /api/login"));
-        check("Burp default hotkeys are detected regardless of modifier order", burpss.core.Shortcuts.usedByBurp("Shift+Ctrl+R")
-                && !burpss.core.Shortcuts.usedByBurp(burpss.core.Shortcuts.QUICK_COPY)
-                && !burpss.core.Shortcuts.usedByBurp(burpss.core.Shortcuts.OPEN));
-        int menu = java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
-        java.awt.event.KeyEvent press = new java.awt.event.KeyEvent(new java.awt.Label(), java.awt.event.KeyEvent.KEY_PRESSED, 0,
-                menu | java.awt.event.InputEvent.SHIFT_DOWN_MASK, java.awt.event.KeyEvent.VK_C, 'C');
-        check("recorded key press uses Burp's hotkey format", "Ctrl+Shift+C".equals(burpss.ui.PreferencesDialog.record(press)));
+        check("Burp default hotkeys are detected regardless of modifier order", Shortcuts.usedByBurp("Shift+Ctrl+R")
+                && !Shortcuts.usedByBurp(Shortcuts.QUICK_COPY)
+                && !Shortcuts.usedByBurp(Shortcuts.OPEN));
+        int menu = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        KeyEvent press = new KeyEvent(new Label(), KeyEvent.KEY_PRESSED, 0,
+                menu | InputEvent.SHIFT_DOWN_MASK, KeyEvent.VK_C, 'C');
+        check("recorded key press uses Burp's hotkey format", "Ctrl+Shift+C".equals(PreferencesDialog.record(press)));
+        EditState captioned = new EditState();
+        captioned.caption = "User B read user A's project.";
+        captioned.aiContext = "IDOR";
+        EditState captionBack = StateCodec.decode(StateCodec.encode(captioned));
+        byte[] v1 = StateCodec.encode(new EditState());
+        v1 = Arrays.copyOf(v1, v1.length - 4);
+        v1[3] = 1;
+        check("caption and AI context survive the codec, v1 states still load",
+                captionBack.caption.equals(captioned.caption) && captionBack.aiContext.equals("IDOR")
+                        && StateCodec.decode(v1).caption.isEmpty());
+
+        String secret = "eyJhbGciOiJIUzI1NiJ9.c2VjcmV0LXNlc3Npb24tdG9rZW4";
+        String aiRequest = "GET /api/projects/1337 HTTP/1.1\r\nHost: app.example\r\nAuthorization: Bearer " + secret + "\r\n\r\n";
+        String aiResponse = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+                + "{\"id\":1337,\"owner\":{\"email\":\"alice@example.com\"},\"name\":\"Secret project\"}";
+        Exchange aiExchange = new Exchange(HttpText.parse(aiRequest, true), HttpText.parse(aiResponse, false),
+                "GET", "https://app.example/api/projects/1337", "app.example", 200, "OK", 120);
+        Settings aiSettings = new Settings();
+        ExchangeContent aiContent = new ExchangeContent(aiExchange, aiSettings, Theme.of(aiSettings));
+        String prompt = AiMarkup.exchangePrompt("IDOR via project ID", aiExchange, aiContent);
+        check("AI prompt hides redacted values", !prompt.contains(secret.substring(0, 20)) && prompt.contains("‹redacted›")
+                && prompt.contains("/api/projects/1337") && prompt.contains("alice@example.com"));
+
+        String reply = "```json\n{\"title\": \"IDOR on project endpoint\", \"caption\": \"User B retrieved project 1337.\", \"marks\": ["
+                + "{\"pane\": \"request\", \"target\": {\"header\": \"authorization\"}, \"note\": \"User B's session\"},"
+                + "{\"pane\": \"request\", \"target\": {\"text\": \"/projects/1337\"}, \"note\": \"User A's project\"},"
+                + "{\"pane\": \"response\", \"target\": {\"json\": \"owner.email\"}, \"note\": \"Owner's email leaked\"},"
+                + "{\"pane\": \"response\", \"target\": {\"status\": true}, \"note\": \"Allowed\"},"
+                + "{\"pane\": \"response\", \"target\": {\"header\": \"X-Missing\"}, \"note\": \"nope\"}]}\n```";
+        AiMarkup.Result result = AiMarkup.exchangeResult(reply, aiExchange, aiContent, 2);
+        List<String> marked = result.marks().stream().map(m -> {
+            Anchor.Text t = (Anchor.Text) m.anchor;
+            return (t.pane() == 0 ? aiRequest : aiResponse).substring(t.start(), t.end());
+        }).toList();
+        check("AI reply maps to header, path text, JSON member and status marks",
+                result.title().equals("IDOR on project endpoint") && result.caption().startsWith("User B")
+                        && result.unmatched() == 1 && marked.size() == 4
+                        && marked.get(0).startsWith("Authorization: Bearer") && marked.get(1).equals("/projects/1337")
+                        && marked.get(2).equals("\"email\":\"alice@example.com\"") && marked.get(3).startsWith("HTTP/1.1 200")
+                        && result.marks().get(0).note.equals("User B's session") && result.marks().get(0).color == 2);
+
+        EditState aiTableState = new EditState();
+        TableContent tableContent = new TableContent(List.of(
+                new ResultRow(1, "1001", 403, 120, 10, ""),
+                new ResultRow(2, "1002", 200, 950, 12, ""),
+                new ResultRow(3, "1003", 200, 940, 11, "")), aiTableState, aiSettings, Theme.of(aiSettings));
+        AiMarkup.Result rows = AiMarkup.tableResult(
+                "{\"title\":\"t\",\"caption\":\"c\",\"marks\":[{\"rows\":[2,3],\"note\":\"Bypass\"},{\"rows\":[9,9]}]}", tableContent, 0);
+        check("AI table reply marks row ranges and skips unknown rows",
+                rows.marks().size() == 1 && rows.marks().get(0).anchor.equals(new Anchor.Rows(2, 3)) && rows.unmatched() == 1
+                        && AiMarkup.tablePrompt("", "GET", "/x", tableContent).contains("Payload: 1002"));
+        String sse = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+                + "event: message\ndata: {\"id\":1,\"token\":\"abcdefgh12345678\"}\n\ndata: [DONE]\n\n";
+        HttpText sseText = HttpText.parse(sse, false);
+        DisplayText sseDisplay = DisplayText.build(sseText, new Settings(), Set.of());
+        StringBuilder shown = new StringBuilder();
+        for (int i = 0; i < sseDisplay.length(); i++) shown.append(sseDisplay.charAt(i));
+        check("SSE data lines with JSON are pretty-printed and auto-redacted",
+                sseText.bodyKind() == HttpText.BodyKind.SSE
+                        && shown.toString().contains("event: message\ndata: {\n  \"id\": 1,\n  \"token\": \"abcdefgh12345678\"\n}\n\ndata: [DONE]")
+                        && AutoRedactor.find(sseText, new Settings()).stream()
+                                .anyMatch(r -> sse.substring(r.start(), r.end()).equals("abcdefgh12345678")));
+        String lineRequest = "GET /api/activities?limit=200&merchantId=66a95a09-bbe5&order=1 HTTP/1.1\r\nHost: x\r\n\r\n";
+        Exchange lineExchange = new Exchange(HttpText.parse(lineRequest, true), null, "GET", "https://x/api/activities", "x", 0, "", -1);
+        ExchangeContent lineContent = new ExchangeContent(lineExchange, aiSettings, Theme.of(aiSettings));
+        AiMarkup.Result lineResult = AiMarkup.exchangeResult(
+                "{\"marks\":[{\"pane\":\"request\",\"target\":{\"text\":\"GET /api/activities?limit=200&merchantId=66a95a09-bbe5&order=1 HTTP/1.1\"},"
+                        + "\"note\":\"Targeted merchantId parameter for IDOR test\"}]}", lineExchange, lineContent, 0);
+        Anchor.Text lineMark = (Anchor.Text) lineResult.marks().get(0).anchor;
+        check("a whole-line AI text target narrows to the parameter named in the note",
+                lineRequest.substring(lineMark.start(), lineMark.end()).equals("merchantId=66a95a09-bbe5"));
+        String wrapped = "GET /api/v1/msys/portal/internal/merchant/activities?limit=200&page=1&merchantId=66a95a09-bbe5-4a4d-87df-5617906e97a5&order=1 HTTP/1.1\r\nHost: x\r\n\r\n";
+        Exchange wrapExchange = new Exchange(HttpText.parse(wrapped, true), null, "GET", "https://x/", "x", 0, "", -1);
+        ExchangeContent wrapContent = new ExchangeContent(wrapExchange, aiSettings, Theme.of(aiSettings));
+        wrapContent.layout(500);
+        int at = wrapped.indexOf("merchantId=");
+        List<Rectangle2D> parts = wrapContent.segments(new Anchor.Text(0, at, wrapped.indexOf("&order")));
+        check("a value that wraps is outlined per visual line, not as one box over both lines",
+                parts.size() == 2 && parts.get(1).getX() < parts.get(0).getX());
         System.out.println(failures == 0 ? "ALL PASSED" : failures + " FAILED");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -197,13 +295,13 @@ public final class LibraryCheck {
         });
     }
 
-    private static void click(java.awt.Container root, String text) {
-        for (java.awt.Component c : root.getComponents()) {
+    private static void click(Container root, String text) {
+        for (Component c : root.getComponents()) {
             if (c instanceof javax.swing.AbstractButton b && (text.equals(b.getText()) || text.equals(b.getToolTipText()))) {
                 b.doClick();
                 return;
             }
-            if (c instanceof java.awt.Container child) click(child, text);
+            if (c instanceof Container child) click(child, text);
         }
     }
 

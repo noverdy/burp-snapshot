@@ -82,7 +82,7 @@ public final class Samples {
         mark.note = "Only this credential pair redirects to the dashboard";
         state.marks.add(mark);
         burpss.render.TableContent content = new burpss.render.TableContent(rows, state, settings, Theme.of(settings));
-        HeaderInfo header = new HeaderInfo(state.title, "POST", "https://app.example.com/login", "app.example.com", 0, "", -1);
+        HeaderInfo header = new HeaderInfo(state.title, state.caption, "POST", "https://app.example.com/login", "app.example.com", 0, "", -1);
         ImageIO.write(new Scene(content, header, state.marks, settings, null).toImage(2), "png", file);
     }
 
@@ -98,7 +98,7 @@ public final class Samples {
         Mark path = new Mark(tokenAnchor(0, req, Token.Kind.PATH, "path"), 4);
         ex.state.marks.add(path);
         ExchangeContent content = new ExchangeContent(ex, settings, Theme.of(settings));
-        HeaderInfo header = new HeaderInfo(ex.state.title, ex.method, ex.url, ex.host, ex.status, ex.reason, ex.timeMs);
+        HeaderInfo header = new HeaderInfo(ex.state.title, ex.state.caption, ex.method, ex.url, ex.host, ex.status, ex.reason, ex.timeMs);
         Scene scene = new Scene(content, header, ex.state.marks, settings, null);
         ImageIO.write(scene.toImage(2), "png", file);
     }

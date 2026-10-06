@@ -46,6 +46,22 @@ public final class TableContent implements Content {
         return p.getY() < HEAD_H || i < 0 || i >= rows.size() || p.getX() < 0 || p.getX() > width ? -1 : rows.get(i).number();
     }
 
+    public List<Integer> rowNumbers() {
+        return rows.stream().map(ResultRow::number).toList();
+    }
+
+    public List<String> describeRows() {
+        List<String> out = new ArrayList<>();
+        for (ResultRow r : rows) {
+            StringBuilder line = new StringBuilder();
+            for (int c = 0; c < columns.size(); c++) {
+                line.append(c == 0 ? "" : " | ").append(columns.get(c)).append(": ").append(cell(r, c));
+            }
+            out.add(line.toString());
+        }
+        return out;
+    }
+
     public String payload(ResultRow row) {
         return state.payloadOverrides.getOrDefault(row.number(), row.payload());
     }

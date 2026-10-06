@@ -28,6 +28,11 @@ public final class ExchangeContent implements Content {
     public record Hit(int pane, int displayIndex, int origin) {
     }
 
+    public record Visible(String text, int[] origin) {
+    }
+
+    public static final String REDACTED = "‹redacted›";
+
     private final Exchange exchange;
     private final Settings settings;
     private final Theme theme;
@@ -251,6 +256,23 @@ public final class ExchangeContent implements Content {
     }
 
     @Override
+    public List<Rectangle2D> segments(Anchor anchor) {
+        if (!(anchor instanceof Anchor.Text t) || t.pane() >= panes.size()) return List.of();
+        Pane p = panes.get(t.pane());
+        java.util.Map<Integer, Rectangle2D> rows = new java.util.TreeMap<>();
+        for (int i = 0; i < p.display.length(); i++) {
+            int o = p.display.origin(i);
+            if (o < t.start() || o >= t.end() || p.display.charAt(i) == '\n') continue;
+            int row = p.layout.lineOf(i);
+            if (row < 0) continue;
+            int col = i - p.layout.lines().get(row).start();
+            Rectangle2D cell = new Rectangle2D.Double(p.textX() + col * cw, p.textY() + row * lh, cw, lh);
+            rows.merge(row, cell, (a, b) -> a.createUnion(b));
+        }
+        return new ArrayList<>(rows.values());
+    }
+
+    @Override
     public Rectangle2D bounds(Anchor anchor) {
         if (!(anchor instanceof Anchor.Text t) || t.pane() >= panes.size()) return null;
         Pane p = panes.get(t.pane());
@@ -321,6 +343,37 @@ public final class ExchangeContent implements Content {
         int lo = Math.min(a.origin(), b.origin());
         int hi = Math.max(a.origin(), b.origin());
         return lo < 0 ? null : new TextRange(lo, hi + 1);
+    }
+
+    public int paneCount() {
+        return panes.size();
+    }
+
+    public Visible visible(int pane) {
+        Pane p = panes.get(pane);
+        StringBuilder text = new StringBuilder();
+        List<Integer> origins = new ArrayList<>();
+        for (PaneLayout.Line line : p.layout.lines()) {
+            if (line.number() > 0 && !text.isEmpty()) append(text, origins, "\n");
+            if (line.synthetic() != null) {
+                append(text, origins, (text.isEmpty() ? "" : "\n") + line.synthetic());
+                continue;
+            }
+            for (int i = line.start(); i < line.end(); i++) {
+                if (!p.hidden[i]) {
+                    text.append(p.display.charAt(i));
+                    origins.add(p.display.origin(i));
+                } else if (i == line.start() || !p.hidden[i - 1]) {
+                    append(text, origins, REDACTED);
+                }
+            }
+        }
+        return new Visible(text.toString(), origins.stream().mapToInt(Integer::intValue).toArray());
+    }
+
+    private static void append(StringBuilder text, List<Integer> origins, String s) {
+        text.append(s);
+        for (int i = 0; i < s.length(); i++) origins.add(DisplayText.INSERTED);
     }
 
     public List<TextRange> redactions(int pane) {

@@ -1,6 +1,9 @@
 package burpss;
 
 import burp.api.montoya.BurpExtension;
+import burp.api.montoya.EnhancedCapability;
+import burp.api.montoya.ai.chat.Message;
+import burp.api.montoya.ai.chat.PromptOptions;
 import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.core.Registration;
 import burp.api.montoya.http.handler.TimingData;
@@ -14,6 +17,7 @@ import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 import burp.api.montoya.ui.contextmenu.MessageEditorHttpRequestResponse;
 import burp.api.montoya.ui.hotkey.HotKey;
 import burp.api.montoya.ui.hotkey.HotKeyEvent;
+import burpss.ai.AiMarkup;
 import burpss.core.Anchor;
 import burpss.core.DecodedText;
 import burpss.core.EditState;
@@ -42,6 +46,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 
 public final class SnapshotExtension implements BurpExtension {
@@ -52,6 +57,25 @@ public final class SnapshotExtension implements BurpExtension {
     private Shortcuts shortcuts;
     private SnapshotsTab tab;
     private final List<Registration> hotkeys = new ArrayList<>();
+    private final AiMarkup.Model ai = new AiMarkup.Model() {
+        public boolean available() {
+            try {
+                return api.ai().isEnabled();
+            } catch (RuntimeException e) {
+                return false;
+            }
+        }
+
+        public String ask(String system, String user) {
+            return api.ai().prompt().execute(PromptOptions.promptOptions().withTemperature(0.2),
+                    Message.systemMessage(system), Message.userMessage(user)).content();
+        }
+    };
+
+    @Override
+    public Set<EnhancedCapability> enhancedCapabilities() {
+        return Set.of(EnhancedCapability.AI_FEATURES);
+    }
 
     @Override
     public void initialize(MontoyaApi api) {
@@ -146,7 +170,7 @@ public final class SnapshotExtension implements BurpExtension {
             state.title = shortcuts.title(first.method(), first.pathWithoutQuery(), host, 0);
             SnapshotLibrary.Table table = new SnapshotLibrary.Table(SnapshotLibrary.rows(selected, times),
                     first.method(), first.url(), host, state, settings);
-            library.saveTable(id, selected, times, first.method(), first.url(), host, new EditorWindow.Update(0, state, settings, true));
+            library.saveTable(id, selected, times, first.method(), first.url(), host, new EditorWindow.Update(0, state, settings, false));
             image = SnapshotLibrary.render(table, settings, settings.exportScale);
             detail = selected.size() + " results · " + first.method() + " " + first.pathWithoutQuery();
         } else {
@@ -157,7 +181,7 @@ public final class SnapshotExtension implements BurpExtension {
                     ? withSelection(toExchange(rr, selected, event.inputEvent()), editor.get()) : toExchange(rr, List.of(), null);
             HttpRequest request = rr.request();
             exchange.state.title = shortcuts.title(request.method(), request.pathWithoutQuery(), request.httpService().host(), exchange.status);
-            library.saveExchange(id, rr, exchange, new EditorWindow.Update(0, exchange.state.copy(), settings, true));
+            library.saveExchange(id, rr, exchange, new EditorWindow.Update(0, exchange.state.copy(), settings, false));
             image = SnapshotLibrary.render(exchange, settings, settings.exportScale);
             detail = request.method() + " " + request.pathWithoutQuery();
         }
@@ -225,6 +249,7 @@ public final class SnapshotExtension implements BurpExtension {
     }
 
     private void show(EditorWindow window) {
+        window.useAi(ai);
         api.userInterface().applyThemeToComponent(window);
         window.open(api.userInterface().swingUtils().suiteFrame());
     }

@@ -209,13 +209,13 @@ final class SnapshotLibrary implements SnapshotsTab.Source {
     }
 
     static BufferedImage render(Exchange e, Settings s, int scale) {
-        HeaderInfo header = new HeaderInfo(e.state.title, e.method, e.url, e.host, e.status, e.reason, e.timeMs);
+        HeaderInfo header = new HeaderInfo(e.state.title, e.state.caption, e.method, e.url, e.host, e.status, e.reason, e.timeMs);
         return new Scene(new ExchangeContent(e, s, Theme.of(s)), header, e.state.marks, s, logo(s)).toImage(scale);
     }
 
     static BufferedImage render(Table t, Settings s, int scale) {
         Content content = new TableContent(t.rows(), t.state(), s, Theme.of(s));
-        HeaderInfo header = new HeaderInfo(t.state().title, t.method(), t.url(), t.host(), 0, "", -1);
+        HeaderInfo header = new HeaderInfo(t.state().title, t.state().caption, t.method(), t.url(), t.host(), 0, "", -1);
         return new Scene(content, header, t.state().marks, s, logo(s)).toImage(scale);
     }
 

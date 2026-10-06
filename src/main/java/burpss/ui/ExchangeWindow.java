@@ -1,5 +1,6 @@
 package burpss.ui;
 
+import burpss.ai.AiMarkup;
 import burpss.core.EditState;
 import burpss.core.Exchange;
 import burpss.core.History;
@@ -63,8 +64,23 @@ public final class ExchangeWindow extends EditorWindow {
 
     @Override
     HeaderInfo header() {
-        return new HeaderInfo(current.state.title, current.method, current.url, current.host,
+        return new HeaderInfo(current.state.title, current.state.caption, current.method, current.url, current.host,
                 current.status, current.reason, current.timeMs);
+    }
+
+    @Override
+    String aiSystem() {
+        return AiMarkup.EXCHANGE_SYSTEM;
+    }
+
+    @Override
+    String aiPrompt(String context) {
+        return AiMarkup.exchangePrompt(context, current, content);
+    }
+
+    @Override
+    AiMarkup.Result aiResult(String reply) {
+        return AiMarkup.exchangeResult(reply, current, content, settings.markColor);
     }
 
     @Override

@@ -1,5 +1,6 @@
 package burpss.ui;
 
+import burpss.ai.AiMarkup;
 import burpss.core.EditState;
 import burpss.core.History;
 import burpss.core.ResultRow;
@@ -45,7 +46,22 @@ public final class TableWindow extends EditorWindow {
 
     @Override
     HeaderInfo header() {
-        return new HeaderInfo(state.title, method, url, host, 0, "", -1);
+        return new HeaderInfo(state.title, state.caption, method, url, host, 0, "", -1);
+    }
+
+    @Override
+    String aiSystem() {
+        return AiMarkup.TABLE_SYSTEM;
+    }
+
+    @Override
+    String aiPrompt(String context) {
+        return AiMarkup.tablePrompt(context, method, url, content);
+    }
+
+    @Override
+    AiMarkup.Result aiResult(String reply) {
+        return AiMarkup.tableResult(reply, content, settings.markColor);
     }
 
     @Override

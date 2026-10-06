@@ -1,5 +1,6 @@
 package burpss.ui;
 
+import burpss.ai.AiMarkup;
 import burpss.core.Anchor;
 import burpss.core.EditState;
 import burpss.core.History;
@@ -34,7 +35,6 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Component;
-import java.awt.FlowLayout;
 import java.awt.Image;
 import java.awt.GraphicsEnvironment;
 import java.awt.Point;
@@ -63,11 +63,14 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     private final Settings.Store store;
     protected final Canvas canvas = new Canvas(this);
     private final boolean table;
-    private JScrollPane sidebar;
+    private JComponent sidebar;
+    private final JComponent actions = buildActions();
     private SettingsPanel settingsPanel;
-    private final JTextField titleField = new JTextField(40);
+    private final JTextField titleField = new JTextField(20);
+    private final javax.swing.JTextArea captionField = new javax.swing.JTextArea(3, 20);
+    private AiMarkup.Model ai;
     private final JComboBox<String> zoom = new JComboBox<>(new String[]{"Fit", "50%", "75%", "100%", "150%", "200%"});
-    private final JLabel status = new JLabel(" ");
+    private JScrollPane canvasScroll;
     protected final JToolBar toolbar = new JToolBar();
     protected Tool tool = Tool.MARK;
     protected Scene scene;
@@ -93,8 +96,11 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
             }
         });
         buildToolbar(!table);
+        watch(titleField, () -> state().title = titleField.getText().strip());
+        watch(captionField, () -> state().caption = captionField.getText().strip());
+        captionField.setToolTipText("Evidence caption, shown under the content");
 
-        JScrollPane canvasScroll = new JScrollPane(canvas, JScrollPane.VERTICAL_SCROLLBAR_ALWAYS, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        canvasScroll = new JScrollPane(canvas, JScrollPane.VERTICAL_SCROLLBAR_ALWAYS, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         canvasScroll.getVerticalScrollBar().setUnitIncrement(16);
         canvasScroll.getHorizontalScrollBar().setUnitIncrement(16);
         canvasScroll.getViewport().addComponentListener(new ComponentAdapter() {
@@ -109,7 +115,6 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         sidebar = sidebar();
         getContentPane().add(canvasScroll, BorderLayout.CENTER);
         getContentPane().add(sidebar, BorderLayout.EAST);
-        getContentPane().add(buildFooter(), BorderLayout.SOUTH);
         bindKeys();
         Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
         setSize(Math.min(1400, screen.width - 40), Math.min(860, screen.height - 40));
@@ -125,6 +130,12 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
 
     abstract String fileName();
 
+    abstract String aiSystem();
+
+    abstract String aiPrompt(String context);
+
+    abstract AiMarkup.Result aiResult(String reply);
+
     void redactClick(Point2D contentPoint) {
     }
 
@@ -135,6 +146,11 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     }
 
     public void open(Component parent) {
+        AiButton aiButton = new AiButton("AI markup");
+        aiButton.setToolTipText("Let Burp AI mark the evidence and write the title and caption");
+        aiButton.addActionListener(e -> openAi());
+        toolbar.add(javax.swing.Box.createHorizontalGlue());
+        toolbar.add(aiButton);
         syncTitleField();
         setLocationRelativeTo(parent);
         setVisible(true);
@@ -156,6 +172,10 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         mutation.run();
         rebuild();
         changed();
+    }
+
+    public void useAi(AiMarkup.Model model) {
+        ai = model;
     }
 
     public void onUpdate(Consumer<Update> listener) {
@@ -184,14 +204,17 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     void syncTitleField() {
         syncingTitle = true;
         titleField.setText(state().title);
+        captionField.setText(state().caption);
         syncingTitle = false;
     }
 
-    private JScrollPane sidebar() {
+    private JComponent sidebar() {
         settingsPanel = new SettingsPanel(settings, table, this::settingsChanged, () -> settings.save(store));
-        JScrollPane pane = settingsPanel.scrollable();
-        pane.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, UIManager.getColor("Separator.foreground")));
-        return pane;
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, UIManager.getColor("Separator.foreground")));
+        panel.add(settingsPanel.scrollable(textSection()), BorderLayout.CENTER);
+        panel.add(actions, BorderLayout.SOUTH);
+        return panel;
     }
 
     void reloadSettings() {
@@ -240,13 +263,16 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
             logo = logoPath.isBlank() ? null : ImageIO.read(new File(logoPath));
         } catch (IOException e) {
             logo = null;
-            flash("Could not read logo: " + e.getMessage());
+            flash("Could not read logo: " + e.getMessage(), Notice.Kind.ERROR);
         }
         return logo;
     }
 
     private void buildToolbar(boolean redaction) {
         toolbar.setFloatable(false);
+        toolbar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, UIManager.getColor("Separator.foreground")),
+                BorderFactory.createEmptyBorder(2, 4, 2, 6)));
         ButtonGroup tools = new ButtonGroup();
         toolButton(tools, "▢ Mark", "Click a param to box it, or drag over any text (M)", Tool.MARK).setSelected(true);
         if (redaction) toolButton(tools, "▒ Redact", "Click a value to redact/unredact it, or drag over any text (R)", Tool.REDACT);
@@ -255,6 +281,7 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         toolbar.add(button("↷ Redo", () -> { if (history().redo()) afterHistory(); }));
         toolbar.add(button("Clear marks", () -> edit(() -> state().marks.clear())));
         toolbar.addSeparator();
+
         toolbar.add(new JLabel("Zoom "));
         zoom.setEditable(true);
         zoom.setToolTipText("Pinch or ⌘/Ctrl + scroll to zoom");
@@ -276,28 +303,109 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
         return b;
     }
 
-    private JComponent buildFooter() {
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        left.add(new JLabel("Title"));
-        left.add(titleField);
-        Timer debounce = new Timer(300, e -> edit(() -> state().title = titleField.getText().strip()));
+    private JComponent buildActions() {
+        JPanel panel = new JPanel(new java.awt.GridLayout(1, 2, 8, 0));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, UIManager.getColor("Separator.foreground")),
+                BorderFactory.createEmptyBorder(8, 12, 8, 12)));
+        panel.add(button("Copy to clipboard", this::copyImage));
+        panel.add(button("Save PNG…", this::saveImage));
+        return panel;
+    }
+
+    private JComponent textSection() {
+        JPanel panel = new JPanel(new java.awt.GridBagLayout());
+        panel.setBorder(BorderFactory.createEmptyBorder(14, 12, 4, 12));
+        java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
+        c.gridx = 0;
+        c.anchor = java.awt.GridBagConstraints.WEST;
+        c.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        c.weightx = 1;
+        c.insets = new java.awt.Insets(0, 0, 4, 0);
+        panel.add(caption("Title"), c);
+        c.insets = new java.awt.Insets(0, 0, 10, 0);
+        panel.add(titleField, c);
+        c.insets = new java.awt.Insets(0, 0, 4, 0);
+        panel.add(caption("Caption"), c);
+        captionField.setLineWrap(true);
+        captionField.setWrapStyleWord(true);
+        captionField.setFont(UIManager.getFont("TextField.font"));
+        captionField.setMargin(new java.awt.Insets(4, 6, 4, 6));
+        JScrollPane captionScroll = new JScrollPane(captionField, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        captionScroll.setPreferredSize(new java.awt.Dimension(100, 72));
+        c.insets = new java.awt.Insets(0, 0, 6, 0);
+        panel.add(captionScroll, c);
+        JButton copyCaption = button("Copy caption", this::copyCaption);
+        copyCaption.setToolTipText("Copy the evidence caption as text for your report");
+        c.fill = java.awt.GridBagConstraints.NONE;
+        c.anchor = java.awt.GridBagConstraints.EAST;
+        c.insets = new java.awt.Insets(0, 0, 0, 0);
+        panel.add(copyCaption, c);
+        c.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        c.insets = new java.awt.Insets(12, 0, 0, 0);
+        panel.add(new javax.swing.JSeparator(), c);
+        return panel;
+    }
+
+    private static JLabel caption(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(java.awt.Font.BOLD));
+        return label;
+    }
+
+    private void watch(javax.swing.text.JTextComponent field, Runnable apply) {
+        Timer debounce = new Timer(300, e -> edit(apply));
         debounce.setRepeats(false);
-        titleField.getDocument().addDocumentListener(new DocumentListener() {
+        field.getDocument().addDocumentListener(new DocumentListener() {
             public void insertUpdate(DocumentEvent e) { if (!syncingTitle) debounce.restart(); }
             public void removeUpdate(DocumentEvent e) { if (!syncingTitle) debounce.restart(); }
             public void changedUpdate(DocumentEvent e) { }
         });
-        left.add(status);
+    }
 
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-        right.add(button("Copy to clipboard", this::copyImage));
-        right.add(button("Save PNG…", this::saveImage));
+    private void copyCaption() {
+        String caption = state().caption;
+        if (caption.isBlank()) {
+            flash("No caption yet", Notice.Kind.INFO);
+            return;
+        }
+        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new java.awt.datatransfer.StringSelection(caption), null);
+        flash("Caption copied", Notice.Kind.SUCCESS);
+    }
 
-        JPanel footer = new JPanel(new BorderLayout());
-        footer.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        footer.add(left, BorderLayout.CENTER);
-        footer.add(right, BorderLayout.EAST);
-        return footer;
+    private void openAi() {
+        if (ai == null || !ai.available()) {
+            javax.swing.JOptionPane.showMessageDialog(this,
+                    "Burp AI isn't available. It needs Burp Suite Professional with AI enabled,\n"
+                            + "and \"Use AI\" turned on for Snapshot in Extensions > Installed.",
+                    "AI markup", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String initial = state().aiContext.isBlank() ? state().title : state().aiContext;
+        new AiDialog(this, initial, !state().marks.isEmpty(), ai, aiSystem(), this::aiPrompt, this::applyAi).setVisible(true);
+    }
+
+    private String applyAi(String reply, String context, boolean replace) {
+        AiMarkup.Result result;
+        try {
+            result = aiResult(reply);
+        } catch (RuntimeException e) {
+            return "Couldn't read the AI reply: " + e.getMessage();
+        }
+        if (result.marks().isEmpty() && result.title().isBlank() && result.caption().isBlank()) {
+            return "Burp AI found nothing to mark. Try adding more context.";
+        }
+        edit(() -> {
+            if (replace) state().marks.clear();
+            state().marks.addAll(result.marks());
+            if (!result.title().isBlank()) state().title = result.title();
+            if (!result.caption().isBlank()) state().caption = result.caption();
+            state().aiContext = context;
+        });
+        syncTitleField();
+        flash(result.marks().size() + " mark" + (result.marks().size() == 1 ? "" : "s") + " added"
+                + (result.unmatched() > 0 ? ", " + result.unmatched() + " skipped" : ""), Notice.Kind.SUCCESS);
+        return null;
     }
 
     private static JButton button(String label, Runnable action) {
@@ -347,26 +455,23 @@ public abstract class EditorWindow extends JFrame implements Canvas.Handler {
     private void copyImage() {
         try {
             ImageExport.copy(scene.toImage(settings.exportScale));
-            flash("Copied to clipboard");
+            flash("Copied to clipboard", Notice.Kind.SUCCESS);
             publish(true);
         } catch (IOException | IllegalStateException e) {
-            flash("Copy failed: " + e.getMessage());
+            flash("Copy failed: " + e.getMessage(), Notice.Kind.ERROR);
         }
     }
 
     private void saveImage() {
         if (ImageExport.save(this, scene.toImage(settings.exportScale), settings, fileName())) {
             settings.save(store);
-            flash("Saved");
+            flash("Saved PNG", Notice.Kind.SUCCESS);
             publish(true);
         }
     }
 
-    private void flash(String message) {
-        status.setText(message);
-        Timer clear = new Timer(2500, e -> status.setText(" "));
-        clear.setRepeats(false);
-        clear.start();
+    private void flash(String message, Notice.Kind kind) {
+        if (canvasScroll.isShowing()) Notice.show(getLayeredPane(), Notice.areaOf(canvasScroll, getLayeredPane()), message, kind);
     }
 
     @Override

@@ -11,7 +11,7 @@ import java.util.Map;
 
 public final class StateCodec {
 
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private StateCodec() {
     }
@@ -50,6 +50,8 @@ public final class StateCodec {
             }
             out.writeInt(s.hiddenRows.size());
             for (int row : s.hiddenRows) out.writeInt(row);
+            out.writeUTF(s.caption);
+            out.writeUTF(s.aiContext);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -59,7 +61,8 @@ public final class StateCodec {
     public static EditState decode(byte[] data) {
         EditState s = new EditState();
         try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(data))) {
-            if (in.readInt() != VERSION) return s;
+            int version = in.readInt();
+            if (version < 1 || version > VERSION) return s;
             s.title = in.readUTF();
             for (int i = in.readInt(); i > 0; i--) {
                 Mark m = new Mark(readAnchor(in), in.readInt());
@@ -74,6 +77,10 @@ public final class StateCodec {
             }
             for (int i = in.readInt(); i > 0; i--) s.payloadOverrides.put(in.readInt(), in.readUTF());
             for (int i = in.readInt(); i > 0; i--) s.hiddenRows.add(in.readInt());
+            if (version >= 2) {
+                s.caption = in.readUTF();
+                s.aiContext = in.readUTF();
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

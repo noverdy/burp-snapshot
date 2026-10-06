@@ -8,7 +8,7 @@ import java.util.Locale;
 
 public final class HttpText {
 
-    public enum BodyKind { NONE, JSON, FORM, MARKUP, TEXT, BINARY }
+    public enum BodyKind { NONE, JSON, SSE, FORM, MARKUP, TEXT, BINARY }
 
     public record HeaderLine(String name, int lineStart, int lineEnd, int valueStart, int valueEnd) {
         public boolean contains(int offset) {
@@ -21,6 +21,7 @@ public final class HttpText {
     private final Style[] styles;
     private final List<Token> tokens = new ArrayList<>();
     private final List<TextRange> jsonScalars = new ArrayList<>();
+    private final List<TextRange> sseJson = new ArrayList<>();
     private final List<HeaderLine> headers = new ArrayList<>();
     private int bodyStart;
     private BodyKind bodyKind = BodyKind.NONE;
@@ -43,6 +44,7 @@ public final class HttpText {
     public Style styleAt(int offset) { return styles[offset]; }
     public List<Token> tokens() { return Collections.unmodifiableList(tokens); }
     public List<TextRange> jsonScalars() { return Collections.unmodifiableList(jsonScalars); }
+    public List<TextRange> sseJson() { return Collections.unmodifiableList(sseJson); }
     public List<HeaderLine> headers() { return Collections.unmodifiableList(headers); }
     public int bodyStart() { return bodyStart; }
     public BodyKind bodyKind() { return bodyKind; }
@@ -97,6 +99,7 @@ public final class HttpText {
         classifyBody();
         switch (bodyKind) {
             case JSON -> parseJson(bodyStart, n);
+            case SSE -> parseSse(bodyStart, n);
             case FORM -> parseParams(bodyStart, trimEnd(bodyStart, n), Token.Kind.BODY_PARAM);
             case MARKUP -> parseMarkup(bodyStart, n);
             default -> { }
@@ -236,7 +239,9 @@ public final class HttpText {
             return;
         }
         String head = text.substring(bodyStart, sampleEnd).strip();
-        if (contentType.contains("json") || head.startsWith("{") || head.startsWith("[")) {
+        if (contentType.contains("event-stream") || head.matches("(?s)(data|event|id|retry):.*")) {
+            bodyKind = BodyKind.SSE;
+        } else if (contentType.contains("json") || head.startsWith("{") || head.startsWith("[")) {
             bodyKind = BodyKind.JSON;
         } else if (contentType.contains("x-www-form-urlencoded")
                 || (contentType.isEmpty() && head.matches("[^=&\\s]+=[^&\\s]*(&[^=&\\s]+(=[^&\\s]*)?)*"))) {
@@ -347,6 +352,40 @@ public final class HttpText {
             return text.substring(s + 1, e - 1);
         }
         return text.substring(s, e);
+    }
+
+    private void parseSse(int start, int end) {
+        int lineStart = start;
+        while (lineStart < end) {
+            int nl = text.indexOf('\n', lineStart);
+            int lineEnd = nl < 0 || nl > end ? end : nl;
+            int contentEnd = lineEnd > lineStart && text.charAt(lineEnd - 1) == '\r' ? lineEnd - 1 : lineEnd;
+            int colon = text.indexOf(':', lineStart);
+            if (colon == lineStart) {
+                style(lineStart, contentEnd, Style.MUTED);
+            } else if (colon > lineStart && colon < contentEnd) {
+                style(lineStart, colon, Style.HEADER_NAME);
+                style(colon, colon + 1, Style.PUNCT);
+                int value = colon + 1;
+                while (value < contentEnd && text.charAt(value) == ' ') value++;
+                if (looksLikeJson(value, contentEnd) && text.substring(lineStart, colon).equals("data")) {
+                    sseJson.add(new TextRange(value, contentEnd));
+                    parseJson(value, contentEnd);
+                } else {
+                    style(value, contentEnd, Style.HEADER_VALUE);
+                }
+            }
+            lineStart = lineEnd + 1;
+        }
+    }
+
+    private boolean looksLikeJson(int start, int end) {
+        String value = text.substring(start, end).strip();
+        if (value.length() < 2) return false;
+        char open = value.charAt(0), close = value.charAt(value.length() - 1);
+        char next = value.substring(1).strip().charAt(0);
+        return open == '{' ? close == '}' && (next == '"' || next == '}')
+                : open == '[' && close == ']' && "{[\"-0123456789tfn]".indexOf(next) >= 0;
     }
 
     private void parseMarkup(int start, int end) {

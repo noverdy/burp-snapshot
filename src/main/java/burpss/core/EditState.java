@@ -16,6 +16,8 @@ public final class EditState {
     public final Map<Integer, String> payloadOverrides = new HashMap<>();
     public final Set<Integer> hiddenRows = new HashSet<>();
     public String title = "";
+    public String caption = "";
+    public String aiContext = "";
 
     public EditState copy() {
         EditState s = new EditState();
@@ -30,6 +32,8 @@ public final class EditState {
         s.payloadOverrides.putAll(payloadOverrides);
         s.hiddenRows.addAll(hiddenRows);
         s.title = title;
+        s.caption = caption;
+        s.aiContext = aiContext;
         return s;
     }
 
@@ -50,5 +54,7 @@ public final class EditState {
         hiddenRows.clear();
         hiddenRows.addAll(o.hiddenRows);
         title = o.title;
+        caption = o.caption;
+        aiContext = o.aiContext;
     }
 }

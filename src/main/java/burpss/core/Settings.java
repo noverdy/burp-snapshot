@@ -33,6 +33,7 @@ public final class Settings {
 
     public Notes notes = Notes.CALLOUT;
     public boolean numberMarks = true;
+    public boolean showCaption = true;
 
     public boolean autoRedact = true;
     public RedactStyle redactStyle = RedactStyle.BLUR;

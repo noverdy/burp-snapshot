@@ -150,7 +150,7 @@ public final class PreferencesDialog extends JDialog {
         return left(label);
     }
 
-    private static JComponent hint(String text) {
+    static JComponent hint(String text) {
         JTextArea label = new JTextArea(text);
         label.setEditable(false);
         label.setFocusable(false);

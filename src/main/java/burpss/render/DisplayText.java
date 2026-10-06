@@ -4,6 +4,7 @@ import burpss.core.HttpText;
 import burpss.core.Names;
 import burpss.core.Settings;
 import burpss.core.Style;
+import burpss.core.TextRange;
 
 import java.util.Arrays;
 import java.util.List;
@@ -85,6 +86,15 @@ public final class DisplayText {
             case JSON -> {
                 if (pretty) prettyJson(start, end);
                 else copy(start, end);
+            }
+            case SSE -> {
+                int at = start;
+                for (TextRange json : pretty ? source.sseJson() : List.<TextRange>of()) {
+                    copy(at, json.start());
+                    prettyJson(json.start(), json.end());
+                    at = json.end();
+                }
+                copy(at, end);
             }
             default -> copy(start, end);
         }

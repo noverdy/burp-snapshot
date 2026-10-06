@@ -12,12 +12,15 @@ A Burp Suite extension that turns a request and response into a clean PNG for yo
 ## Features
 
 - Request and response side by side or stacked, drawn in Burp's own light or dark editor colors with line numbers.
+- JSON bodies are pretty-printed, including each `data:` line of a server-sent events (SSE) stream.
 - Click a parameter, cookie, header or JSON key to box the whole key and value, then type a note. Notes appear as callouts you can drag, or as a numbered legend under the image.
 - Automatic redaction of `Authorization`, `Cookie`, `Set-Cookie`, API key headers and any parameter that looks like a password, token or session. Long values keep their last 4 characters so you can tell two tokens apart. Click any other value to redact it as well.
 - A tiled watermark with `{date}` and `{host}` placeholders and an optional logo.
 - Intruder results as a table, with the payloads worked out from the selected requests.
 - Copy to the clipboard or save a PNG at 1x, 2x or 3x.
 - Hotkeys: copy a snapshot straight to the clipboard without opening a window, or open the editor.
+- AI markup (Burp Pro): describe the finding in a sentence and Burp AI boxes the evidence, writes the notes and fills the title and evidence caption.
+- An evidence caption per snapshot that you can copy as text into your report.
 - Autosave into the Burp project, with a **Snapshot** tab to reopen drafts and exported snapshots.
 
 > [!IMPORTANT]
@@ -61,6 +64,21 @@ In the Snapshot window:
 > [!TIP]
 > Select text in Burp's message editor before you right-click and the snapshot opens with that text already boxed.
 
+### AI markup and captions
+
+Click **✦ AI markup…** in the editor toolbar and describe what the screenshot should prove, for example "IDOR: user B reads user A's project by changing the project ID in the URL". Burp AI then:
+
+- boxes the evidence, such as the session header, the project ID in the path and the leaked fields in the response, each with a short note
+- fills in the title
+- writes an evidence caption: one or two sentences describing the screenshot, for use as a figure caption
+
+The marks are ordinary marks, so you can move, edit or delete them. One undo removes the whole AI change. The context you typed is saved with the snapshot, so you can adjust it and run it again. For results tables, it marks the rows that matter.
+
+The **Caption** field under the title holds the evidence caption. You can also write it by hand. It appears in a strip at the bottom of the image, and **Copy caption** puts it on the clipboard as text. Turn off **Caption under the content** in **Frame & text** to leave it off the image.
+
+> [!NOTE]
+> AI markup needs Burp Suite Professional with AI enabled, and **Use AI** turned on for Snapshot in **Extensions → Installed**. It uses your AI credits and only runs when you click **Generate**. Burp AI receives the request and response as the image shows them: redacted values are replaced with a placeholder and hidden headers are left out.
+
 ### Hotkeys
 
 | Hotkey | What it does |
@@ -70,7 +88,7 @@ In the Snapshot window:
 
 Both work in message editors, Proxy history, Intruder results, the site map and Organizer. With two or more rows selected, you get a results table. Text you selected in the editor is boxed already.
 
-After a quick copy, a small notification shows a thumbnail with an **Open** button. The copy is saved under **Exported**, so you can fix it later. Quick copy skips the review step, so check the thumbnail: auto-redaction only knows the names in your redaction rules.
+After a quick copy, a small notification shows a thumbnail with an **Open** button. The snapshot is saved under **Drafts**, so you can open it and fix it later. Copying or saving it from the editor moves it to **Exported**. Quick copy skips the review step, so check the thumbnail: auto-redaction only knows the names in your redaction rules.
 
 To change the keys or the quick copy title (default `{method} {path}`), click the gear in the **Snapshot** tab.
 
