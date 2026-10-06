@@ -5,9 +5,9 @@
 
 A Burp Suite extension that turns a request and response into a clean PNG for your pentest report. Box what matters, add notes, and secrets get blurred for you. No more screenshot, paint tool and manual blurring.
 
-![Snapshot demo](docs/demo.gif)
+![Snapshot demo](docs/demo-v1.3.gif)
 
-[Watch the demo in full quality (25 s)](docs/demo.mp4)
+[Watch the demo in full quality (25 s)](docs/demo-v1.3.mp4)
 
 ## Features
 
