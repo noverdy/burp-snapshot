@@ -43,8 +43,24 @@ tasks.register<JavaExec>("demo") {
     val burpJar = providers.gradleProperty("burpJar")
         .getOrElse("/Applications/Burp Suite.app/Contents/Resources/app/burpsuite.jar")
     classpath = sourceSets["test"].runtimeClasspath + files(burpJar)
-    mainClass.set("burpss.ui.DemoRecorder")
-    args(layout.buildDirectory.file("demo/snapshot-demo.mp4").get().asFile.absolutePath)
+    mainClass.set("burpss.ui.VideoRecorder")
+    args("full", layout.buildDirectory.file("demo/snapshot-demo.mp4").get().asFile.absolutePath)
+}
+
+tasks.register<JavaExec>("demoGif") {
+    val burpJar = providers.gradleProperty("burpJar")
+        .getOrElse("/Applications/Burp Suite.app/Contents/Resources/app/burpsuite.jar")
+    classpath = sourceSets["test"].runtimeClasspath + files(burpJar)
+    mainClass.set("burpss.ui.VideoRecorder")
+    args("full-still", layout.buildDirectory.file("demo/snapshot-demo-still.mp4").get().asFile.absolutePath)
+}
+
+tasks.register<JavaExec>("promo") {
+    val burpJar = providers.gradleProperty("burpJar")
+        .getOrElse("/Applications/Burp Suite.app/Contents/Resources/app/burpsuite.jar")
+    classpath = sourceSets["test"].runtimeClasspath + files(burpJar)
+    mainClass.set("burpss.ui.VideoRecorder")
+    args("whats-new", layout.buildDirectory.file("promo/snapshot-whats-new.mp4").get().asFile.absolutePath)
 }
 
 tasks.register<JavaExec>("libraryCheck") {
